@@ -1,0 +1,42 @@
+name:                 sebweb
+version:              0.0.1
+synopsis:             Webserver based on Warp
+description:          Please see README
+homepage:             https://sebsprojects.net
+license:              BSD3
+license-file:         LICENSE
+author:               Sebastian Kreisel
+maintainer:           seb@elfeck.com
+copyright:            Copyright: (c) 2020 Sebastian Kreisel
+category:             web
+build-type:           Simple
+cabal-version:        >= 1.10
+
+library
+  hs-source-dirs:     src
+  ghc-options:        -Wall
+  default-language:   Haskell2010
+  default-extensions: OverloadedStrings
+  exposed-modules:    Sebweb.Utils
+                      , Sebweb.Log
+                      , Sebweb.LogI
+                      , Sebweb.LogH
+  build-depends:      base
+                      , time >= 1.9.1
+                      , text
+                      , bytestring
+                      , base64-bytestring
+                      , directory
+                      , wai
+                      , warp
+                      , warp-tls
+                      , http-types
+                      , network
+                      , blaze-html
+                      , binary
+                      , aeson
+                      , vault
+                      , stm
+                      , network
+                      , cryptonite
+                      , process
