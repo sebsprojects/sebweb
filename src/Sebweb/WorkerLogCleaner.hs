@@ -1,8 +1,9 @@
-module Sebweb.WorkerLogCleaner where
+module Sebweb.WorkerLogCleaner (
+    workerLogCleaner
+) where
 
 import System.IO
 import System.Directory
-import System.Process
 import Control.Concurrent
 import Control.Monad
 import Control.Exception
@@ -13,86 +14,61 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 
 import Sebweb.Utils
-import Sebweb.LogHttp
-import Sebweb.LogInternal
+import Sebweb.Log
+import Sebweb.LogI
 
 
 -- ---------------------------------------------------------------------------
 -- Worker and related high level functions
 
-logCleaningWorker :: InternalLogQueue -> T.Text -> T.Text -> IO ()
-logCleaningWorker ilq logDir storDir = do
-  -- TODO: Safe!
+workerLogCleaner :: LogQueue -> T.Text -> T.Text -> IO ()
+workerLogCleaner ilq logDir storDir = do
+  -- TODO: FILE IO
   createDirectoryIfMissing False (T.unpack storDir)
+  createDirectoryIfMissing False (T.unpack $ logDir <> "/trash")
   nowStartUp <- getCurrentTime
   let su3AM = secondsUntilTomorrowAtHour 3 nowStartUp
-  enqueueInternalLogLine ilq $ InternalLogData nowStartUp ILInfo ITWorker $
+  logEnqueue ilq $ ILogData nowStartUp ILInfo ITWorker $
     "logcleaner: scheduling log cleaning for in " <> (T.pack $ show su3AM) <>
     " seconds"
   threadDelay (su3AM * 1000000)
   _ <- forever $ do
     now <- getCurrentTime
-    internalLogCleaner ilq logDir storDir
-    httpLogCleaner ilq logDir storDir
+    logCleaner ilq logDir storDir "_internallog.txt"
+    logCleaner ilq logDir storDir "_httplog.txt"
     threadDelay ((secondsUntilTomorrowAtHour 3 now) * 1000000)
   return ()
 
--- Attempts to clean all log files that are older than currentMonth-2 months
-internalLogCleaner :: InternalLogQueue -> T.Text -> T.Text -> IO ()
-internalLogCleaner ilq logDir storDir = do
+-- Attempts to clean log files up to 12 months back
+logCleaner :: LogQueue -> T.Text -> T.Text -> T.Text -> IO ()
+logCleaner ilq logDir storDir suff = do
   now <- getCurrentTime
-  let ms = monthList now 10
-  -- Delay by 2 seconds between files if the asynch zip call takes some time
-  -- to prevent to many zip processes spawning
-  --mapM_ (\(y,m) -> uncurry (logCleaner ilq (fil y m) logDir) (afp y m) >>
-  --                 threadDelay (2 * 1000000))
-  --      ms
-  mapM_ (\(y,m) -> uncurry (logCleaner ilq (fil y m) logDir) (afp y m)) ms
-  where afp y m = (storDir <> "/" <> y <> "-" <> m <> "_internallog.txt",
-                   storDir <> "/" <> y <> "_internallog.zip")
-        fil y m t = intFilter t && dateFilter y m t
+  let ms = monthList now 12 10
+  mapM_ (\(y,m) -> (cleanLog ilq (mkFil y m) logDir (mkPth y m))) ms
+  where mkPth y m = storDir <> "/" <> y <> "-" <> m <> suff
+        mkFil y m t = intFilter t && dateFilter y m t
 
--- Attempts to clean all log files that are older than currentMonth-2 months
-httpLogCleaner :: InternalLogQueue -> T.Text -> T.Text -> IO ()
-httpLogCleaner ilq logDir storDir = do
+cleanLog :: LogQueue -> (T.Text -> Bool) -> T.Text -> T.Text -> IO ()
+cleanLog ilq fil logDir storFile = do
   now <- getCurrentTime
-  let ms = monthList now 10 -- deal with the log files of the last 10+2 months
-  --mapM_ (\(y,m) -> uncurry (logCleaner ilq (fil y m) logDir) (afp y m) >>
-  --                 threadDelay (2 * 1000000))
-  --      ms
-  mapM_ (\(y,m) -> uncurry (logCleaner ilq (fil y m) logDir) (afp y m)) ms
-  where afp y m = (storDir <> "/" <> y <> "-" <> m <> "_httplog.txt",
-                   storDir <> "/" <> y <> "_httplog.zip")
-        fil y m t = httpFilter t && dateFilter y m t
-
--- Attempts to gather all log files in logDir matching the filter into one file
--- storFile and then add this file to the zip archive zipFile
-logCleaner :: InternalLogQueue -> (T.Text -> Bool) -> T.Text -> T.Text ->
-              T.Text -> IO ()
-logCleaner ilq fil logDir storFile zipFile = do
-  now <- getCurrentTime
+  -- TODO: FILE IO
   logs <- listDirectory (T.unpack logDir) >>=
           return . sort . (filter fil) . (map T.pack)
   case null logs of
     True -> return ()
     False -> do
-      enqueueInternalLogLine ilq $ InternalLogData now ILInfo ITWorker $
+      logEnqueue ilq $ ILogData now ILInfo ITWorker $
         "logcleaner: filter matching " <> T.pack (show $ length logs) <>
         " log files, starting cleaning"
-      -- TODO: Safe!
+      -- TODO: FILE IO
       bracket
         (openFile (T.unpack storFile) WriteMode)
         (hClose)
         (\h -> mapM_ (appendLogFile logDir h) logs)
       let trashDir = logDir <> "/trash"
-      -- TODO: Safe!
-      createDirectoryIfMissing False (T.unpack trashDir)
-      --putStrLn $ "\nFilter matches " <> (show $ length logs) <> "log files"
       mapM_ (\f -> renameFile (prepDir logDir f) (prepDir trashDir f)) logs
-      --callProcess "zip" ["--quiet", "--test", "--move", "--junk-paths",
-      --                   T.unpack zipFile, T.unpack storFile]
-      enqueueInternalLogLine ilq $ InternalLogData now ILInfo ITWorker
-                                   "logcleaner: cleaning successful"
+      logEnqueue ilq $ ILogData now ILInfo ITWorker
+                                      "logcleaner: cleaning successful"
   where prepDir d f = T.unpack $ d <> "/" <> f
 
 
@@ -101,33 +77,23 @@ logCleaner ilq fil logDir storFile zipFile = do
 
 appendLogFile :: T.Text -> Handle -> T.Text -> IO ()
 appendLogFile logDir h p = do
-  let mds = listToMaybe $ T.splitOn "_" p
-  --putStrLn $ "Processing " <> T.unpack p
-  case mds of
+  case listToMaybe (T.splitOn "_" p) of
     Nothing -> return ()
-    Just ds -> do
-      -- TODO: Make exception safe
+    Just _ -> do
+      -- TODO: FILE IO
       bracket
         (openFile (T.unpack $ logDir <> "/" <> p) ReadMode)
         hClose
-        (\hLog -> processLines ds h hLog)
-      --putStrLn "Done processing"
+        (\hLog -> processLines h hLog)
 
--- TODO: This is hacky and should be dealt with properly
--- Detect if we are parsing http log lines
-processLines :: T.Text -> Handle -> Handle -> IO ()
-processLines dateString h hl = do
-  iseof <- hIsEOF hl
+processLines :: Handle -> Handle -> IO ()
+processLines hStor hLog = do
+  iseof <- hIsEOF hLog
   if iseof
-    then return ()
-    else do
-      l <- TIO.hGetLine hl
-      case isDNT (parseCSVLine l) of
-        True -> return ()
-        False -> TIO.hPutStrLn h (dateString <> " " <> l)
-      processLines dateString h hl
-  where isDNT csv | length csv `elem` [11, 12] = (csv !! 10) == "1"
-                  | otherwise = False
+  then return ()
+  else do
+    TIO.hGetLine hLog >>= TIO.hPutStrLn hStor
+    processLines hStor hLog
 
 
 -- ---------------------------------------------------------------------------
@@ -143,13 +109,17 @@ dateFilter :: T.Text -> T.Text -> T.Text -> Bool
 dateFilter year month t =
           let mtoks = fmap (T.splitOn "-") (listToMaybe (T.splitOn "_" t))
           in case mtoks of
-            Just (y:m:_:[]) -> y == year && m == month
+            Just (y : m:_:[]) -> y == year && m == month
             _ -> False
 
-monthList :: UTCTime -> Integer -> [(T.Text, T.Text)]
-monthList now numMonths =
-  let ms = map (\d -> addGregorianMonthsClip (-d) (utctDay now))
-          [2..(numMonths)+2]
+-- Enumerates (Y,m) starting at (now - dBuf) backward for numMonths
+monthList :: UTCTime -> Integer -> Integer -> [(T.Text, T.Text)]
+monthList now numMonths dBuf =
+  let (_, currentMonth, _) = toGregorian (utctDay now)
+      (_, potStartMonth, _) = toGregorian (addDays (-dBuf) $ utctDay now)
+      start = if currentMonth == potStartMonth then 0 else 1
+      ms = map (\d -> addGregorianMonthsClip (-d) (utctDay now))
+          [start .. (numMonths + start - 1)]
       ss = map (\t -> T.pack $ formatTime defaultTimeLocale "%Y-%m" t) ms
   in map ((\t -> (safeHead "" t, safeLast "" t)) . (T.splitOn "-")) ss
 

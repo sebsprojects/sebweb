@@ -3,7 +3,7 @@ module Sebweb.LogI (
   , ILogType(..)
   , ILogData(..)
 
-  , ILogQuery
+  , ILogQuery(..)
   , iLogPerformQuery
 ) where
 
@@ -90,8 +90,7 @@ assembleInternalReport csv =
   in ILogData { ildTime = fromMaybe errorTime mtim
               , ildLevel = textToILLeniant (csv !! 1)
               , ildType = textToITLeniant (csv !! 2)
-              , ildMessage = dropQuotation (csv !! 3)
-              }
+              , ildMessage = dropQuotation (csv !! 3) }
 
 matchesInternalQuery :: ILogQuery -> [T.Text] -> Bool
 matchesInternalQuery ilqr csv =

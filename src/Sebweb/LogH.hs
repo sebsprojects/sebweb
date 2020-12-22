@@ -46,10 +46,10 @@ assembleHttpLogLine hld = T.intercalate "," xs <> "\n"
   where xs = [ -- basic: timestamp, ip, status, version, method, url
                T.pack $ formatTime defaultTimeLocale "%F %T" (hldTime hld)
                , fromMaybe "" (hldIP hld)
-               , hldStatus hld
                , hldVersion hld
                , hldMethod hld
                , encodeCSV 64 $ hldPath hld
+               , hldStatus hld
                -- header: host, referer, user-agent
                , encodeCSV 64 $ fromMaybe "" (hldHeaderHost hld)
                , encodeCSV 64 $ fromMaybe "" (hldReferer hld)
@@ -82,8 +82,8 @@ tryUATokens (t : ts) uaText | T.isInfixOf t uaText = Just t
 
 data HLogQuery = HLogQuery {
   hlqDate :: UTCTime
-, hlqStatus :: [T.Text]
 , hlqMethods :: [T.Text]
+, hlqStatus :: [T.Text]
 , hlqStatic :: (Bool, Bool)
 } deriving (Show, Eq)
 
@@ -113,24 +113,28 @@ assembleHttpReport csv =
   let mtim = parseTimeM False defaultTimeLocale "%F %T" (T.unpack $ csv !! 0)
   in HLogData {
     hldTime = fromMaybe errorTime mtim
-  , hldIP = safeIndex csv 1
-  , hldVersion = undefined
-  , hldMethod = csv !! 4
-  , hldPath = dropQuotation (csv !! 5)
-  , hldStatus = csv !! 2
+  , hldIP = if dnt then Nothing else safeIndex csv 1
+  , hldVersion = csv !! 2
+  , hldMethod = csv !! 3
+  , hldPath = dropQuotation (csv !! 4)
+  , hldStatus = csv !! 5
   , hldHeaderHost = fmap dropQuotation (safeIndex csv 6)
   , hldReferer = fmap dropQuotation (safeIndex csv 7)
-  , hldUserAgent = undefined
-  , hldCookie = undefined
-  , hldDNT = undefined
-  , hldCountry = safeIndex csv 11
-  }
+  , hldUserAgent = if dnt then Nothing else procMT (csv !! 8)
+  , hldCookie = procBool (csv !! 9)
+  , hldDNT = dnt
+  , hldCountry = procMT (csv !! 11) }
+  where procMT "" = Nothing
+        procMT t = Just t
+        procBool "1" = True
+        procBool _ = False
+        dnt = procBool (csv !! 10)
 
 matchesHttpQuery :: HLogQuery -> [T.Text] -> Bool
 matchesHttpQuery hlq csv =
-  let suff = fromMaybe "" $ extractPathSuffix (dropQuotation (csv !! 5))
-  in and [(csv !! 2) `elem` (hlqStatus hlq),
-          (csv !! 4) `elem` (hlqMethods hlq),
+  let suff = fromMaybe "" $ extractPathSuffix (dropQuotation (csv !! 4))
+  in and [(csv !! 5) `elem` (hlqStatus hlq),
+          (csv !! 3) `elem` (hlqMethods hlq),
           (evalStatic (isStaticSuffix suff) (hlqStatic hlq))]
   where evalStatic _ (True, True) = True
         evalStatic True (_, True) = True

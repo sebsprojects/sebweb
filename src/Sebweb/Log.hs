@@ -4,9 +4,10 @@ module Sebweb.Log (
   , logCreateQueue
   , logDirect
   , logEnqueue
-  , logWriter
+  , workerLogWriter
 
   , readLogH
+  , logListFileDates
 ) where
 
 import System.IO hiding (hPutStr)
@@ -15,6 +16,7 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM
 import Control.Monad
 import Data.Time
+import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 
@@ -43,8 +45,8 @@ logEnqueue ilq ld = do
   if isCritical ld then TIO.hPutStr stderr ll else return ()
   atomically $ writeTBQueue ilq ll
 
-logWriter :: T.Text -> T.Text -> Int -> LogQueue -> IO ()
-logWriter logDir fileSuffix logInterval lq = do
+workerLogWriter :: T.Text -> T.Text -> Int -> LogQueue -> IO ()
+workerLogWriter logDir fileSuffix logInterval lq = do
   _ <- forever $ do
     threadDelay (logInterval * 1000000)
     now <- getCurrentTime
@@ -79,4 +81,12 @@ readLogH logDir tim suff = do
     True -> do
       -- TODO: FILE IO
       openFileRetryTimeout (1 * 1000000) (50 * 1000) fileName ReadMode
+
+logListFileDates :: T.Text -> T.Text -> IO [UTCTime]
+logListFileDates logDir infx = do
+  -- TODO: Safer!
+  es <- listDirectory (T.unpack logDir) >>= pure . (map T.pack)
+  let logs = filter (T.isInfixOf infx) es
+  let dateStrings = map (T.unpack . (safeHead "") . (T.splitOn "_")) logs
+  return $ catMaybes $ map (parseTimeM True defaultTimeLocale "%F") dateStrings
 
