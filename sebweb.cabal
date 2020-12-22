@@ -31,6 +31,9 @@ library
                       , Sebweb.LogI
                       , Sebweb.LogH
                       , Sebweb.WorkerLogCleaner
+                      , Sebweb.WorkerWhoisLooker
+                      , Sebweb.Response
+                      , Sebweb.ResponseError
   build-depends:      base
                       , time >= 1.9.1
                       , text

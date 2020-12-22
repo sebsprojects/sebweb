@@ -46,7 +46,8 @@ logCleaner ilq logDir storDir suff = do
   let ms = monthList now 12 10
   mapM_ (\(y,m) -> (cleanLog ilq (mkFil y m) logDir (mkPth y m))) ms
   where mkPth y m = storDir <> "/" <> y <> "-" <> m <> suff
-        mkFil y m t = intFilter t && dateFilter y m t
+        mkFil y m t = dateFilter y m t &&
+                     (typeFilter "internal" suff t || typeFilter "http" suff t)
 
 cleanLog :: LogQueue -> (T.Text -> Bool) -> T.Text -> T.Text -> IO ()
 cleanLog ilq fil logDir storFile = do
@@ -99,18 +100,15 @@ processLines hStor hLog = do
 -- ---------------------------------------------------------------------------
 -- Filters and Utility
 
-httpFilter :: T.Text -> Bool
-httpFilter t = T.isInfixOf "http" t && not (T.isInfixOf "old" t)
-
-intFilter :: T.Text -> Bool
-intFilter t = T.isInfixOf "internal" t
-
 dateFilter :: T.Text -> T.Text -> T.Text -> Bool
 dateFilter year month t =
           let mtoks = fmap (T.splitOn "-") (listToMaybe (T.splitOn "_" t))
           in case mtoks of
             Just (y : m:_:[]) -> y == year && m == month
             _ -> False
+
+typeFilter :: T.Text -> T.Text -> T.Text -> Bool
+typeFilter typ suff t = T.isInfixOf typ suff && T.isInfixOf typ t
 
 -- Enumerates (Y,m) starting at (now - dBuf) backward for numMonths
 monthList :: UTCTime -> Integer -> Integer -> [(T.Text, T.Text)]
