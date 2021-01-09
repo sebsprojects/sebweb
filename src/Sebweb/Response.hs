@@ -44,7 +44,7 @@ buildRedirectResp target =
   responseBuilder status303 [(hLocation, TE.encodeUtf8 target)] empty
 
 buildFullRedirectResp :: T.Text -> Request -> Response
-buildFullRedirectResp host req =
+buildFullRedirectResp host req = 
   responseBuilder status301 [(hLocation, p)] mempty
   where p = "https://" <> TE.encodeUtf8 host <> rawPathInfo req <>
             rawQueryString req

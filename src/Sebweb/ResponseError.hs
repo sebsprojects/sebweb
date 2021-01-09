@@ -1,6 +1,9 @@
 module Sebweb.ResponseError (
     ErrorPage
+  , buildErrorResp
+  , buildErrorResp'
   , errorResp
+
   , htmlErrorResp
   , jsonErrorResp
   , plainErrorResp
@@ -14,20 +17,33 @@ import Network.HTTP.Types
 import Text.Blaze.Html (Html)
 
 import Sebweb.Utils
+import Sebweb.Common
 import Sebweb.Response
 
 
-type ErrorPage = Status -> Maybe T.Text -> Maybe T.Text -> Html
+type ErrorPage = RequestData -> Status -> Maybe T.Text -> Maybe T.Text -> Html
 
+buildErrorResp' :: ErrorPage -> Status -> Request -> Response
+buildErrorResp' err status req =
+  buildErrorResp err status (standardErrorMessage $ statusCode status) req
 
-errorResp:: ErrorPage -> Status -> Maybe T.Text -> Maybe T.Text -> Response
-errorResp ehtml status (Just "GET") mmsg = htmlErrorResp ehtml status mmsg
-errorResp _ status (Just "POST") mmsg = jsonErrorResp status mmsg
-errorResp _ status _ mmsg = plainErrorResp status mmsg
+buildErrorResp :: ErrorPage -> Status -> T.Text -> Request -> Response
+buildErrorResp errorPage status msg req =
+  errorResp errorPage
+            (getRequestData req)
+            status
+            (Just $ decodeUtf8Ignore $ requestMethod req)
+            (if T.null msg then Nothing else Just msg)
 
-htmlErrorResp :: ErrorPage -> Status -> Maybe T.Text -> Response
-htmlErrorResp errorPage status mmsg =
-  buildHtmlResp status (errorPage status (Just "GET") mmsg)
+errorResp :: ErrorPage -> RequestData -> Status -> Maybe T.Text ->
+             Maybe T.Text -> Response
+errorResp ehtm rd status (Just "GET") mmsg = htmlErrorResp ehtm rd status mmsg
+errorResp _ _ status (Just "POST") mmsg = jsonErrorResp status mmsg
+errorResp _ _ status _ mmsg = plainErrorResp status mmsg
+
+htmlErrorResp :: ErrorPage -> RequestData -> Status -> Maybe T.Text -> Response
+htmlErrorResp errorPage rd status mmsg =
+  buildHtmlResp status (errorPage rd status (Just "GET") mmsg)
 
 jsonErrorResp :: Status -> Maybe T.Text -> Response
 jsonErrorResp status mmsg = buildJsonResp status $
@@ -47,4 +63,11 @@ plainErrorResp status mmsg = buildPlainResp status $
   case mmsg of
     Nothing -> ""
     Just msg -> "Error Info: " <> TE.encodeUtf8 msg <> "\n"
+
+standardErrorMessage :: Int -> T.Text
+standardErrorMessage 400 = "invalid header host"
+standardErrorMessage 405 = "invalid request method"
+standardErrorMessage 413 = "maximum request body length exceeded"
+standardErrorMessage 503 = "response timeout exceeded"
+standardErrorMessage _ = ""
 

@@ -27,6 +27,8 @@ library
   default-language:   Haskell2010
   default-extensions: OverloadedStrings
   exposed-modules:    Sebweb.Utils
+                      , Sebweb.Common
+                      , Sebweb.Config
                       , Sebweb.Log
                       , Sebweb.LogI
                       , Sebweb.LogH
@@ -34,6 +36,8 @@ library
                       , Sebweb.WorkerWhoisLooker
                       , Sebweb.Response
                       , Sebweb.ResponseError
+                      , Sebweb.Session
+                      , Sebweb.Middleware
   build-depends:      base
                       , time >= 1.9.1
                       , text
@@ -47,7 +51,6 @@ library
                       , network
                       , blaze-html
                       , binary
-                      , aeson
                       , vault
                       , stm
                       , network

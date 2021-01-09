@@ -42,6 +42,8 @@ module Sebweb.Utils (
 , openFileRetryTimeout
 , openFileRetry
 , openFileSafe
+
+, generateRandom64
 ) where
 
 import System.IO
@@ -53,11 +55,13 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Text.Encoding.Error (ignore)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as B8
+import qualified Data.ByteString.Base64 as B64
 import Data.Time
 import Data.Maybe
 import Network.Wai
 import Network.HTTP.Types.Header
-
+import Crypto.Random
 
 -- ---------------------------------------------------------------------------
 -- Parsing Utility
@@ -270,4 +274,10 @@ openFileRetry ri fp m =
 openFileSafe :: FilePath -> IOMode -> IO (Maybe Handle)
 openFileSafe fp m =
   catch (openFile fp m >>= pure . Just) (\(_ :: IOException) -> pure Nothing)
+
+generateRandom64 :: IO T.Text
+generateRandom64 = do
+  sysDRG <- getSystemDRG
+  let (dat, _) = randomBytesGenerate 24 sysDRG
+  return $ T.pack $ B8.unpack $ B64.encode dat
 
