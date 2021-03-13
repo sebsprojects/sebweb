@@ -1,4 +1,3 @@
-
 module Sebweb.Common (
     UserAccess(..)
   , RequestData(..)

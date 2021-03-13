@@ -80,7 +80,7 @@ isWebSuffix :: T.Text -> Bool
 isWebSuffix suff = suff `elem` ["css", "js"]
 
 isResourceSuffix :: T.Text -> Bool
-isResourceSuffix suff = suff `elem` ["txt", "png", "jpg", "pdf", "ico"]
+isResourceSuffix suff = suff `elem` ["txt", "png", "jpg", "svg", "pdf", "ico"]
 
 isStaticSuffix :: T.Text -> Bool
 isStaticSuffix suff = isWebSuffix suff || isResourceSuffix suff

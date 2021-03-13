@@ -124,14 +124,14 @@ withRequestLogging hlq app req respond = app req $ \r -> do
 --   allowWWW for http-acme challange set to true for http-redirector
 --   only to circumvent redirection
 --   Serves a 400 error response for any other host
-withHeaderHostCheck :: T.Text -> Bool -> ErrorPage -> Middleware
-withHeaderHostCheck hostName allowWWW err app req respond = do
+withHeaderHostCheck :: T.Text -> ErrorPage -> Middleware
+withHeaderHostCheck hostName err app req respond = do
   case (fmap stripPort (requestHeaderHost req)) of
     Just hn | hn == hostName -> app req respond
-            | hn == "www." <> hostName ->
-               if allowWWW
-               then app req respond
-               else respond $ buildFullRedirectResp hostName req
+            -- | hn == "www." <> hostName ->
+            --   if allowWWW
+            --   then app req respond
+            --   else respond $ buildFullRedirectResp hostName req
             | otherwise -> respond $ buildErrorResp' err status400 req
     Nothing -> respond $ buildErrorResp' err status400 req
   where stripPort t = safeHead "" (T.splitOn ":" $ decodeUtf8Ignore t)
@@ -166,8 +166,8 @@ withResponseTimeoutCheck seconds err app req respond = do
 -- ------------------------------------------------------------------------
 -- Response Augmentation
 
-withCommonHeaders :: T.Text -> Middleware
-withCommonHeaders _ app req respond = app req (respond . addHs)
+withCommonHeaders :: Middleware
+withCommonHeaders app req respond = app req (respond . addHs)
   where addHs = addResponseHeaders [ ("Content-Security-Policy", csp)
                                    , ("Strict-Transport-Security", sts)
                                    , ("Tk", "N") ]
@@ -235,14 +235,14 @@ withCertbotACMEHandler ilq staticDir app req respond = do
   where logACME tim l m = logEnqueue ilq $ ILogData tim l ITOther m
 
 -- TODO: use rawPath instead, especially for valid path?
--- TODO: No staticDir path prefix anymore? Missing leading / ?
+-- TODO: Pass static dir prefix as argument from config
 withStaticFileHandler :: Middleware
 withStaticFileHandler app req respond = do
   now <- getCurrentTime
   let suff = fromMaybe "" $ extractPathSuffix' (pathInfo req)
   if isStaticSuffix suff && isValidPath (pathInfo req)
     then do
-      let fpth = T.intercalate "/" (pathInfo req)
+      let fpth = T.intercalate "/" ("static" : pathInfo req)
       -- TODO: FILE IO
       fe <- doesFileExist (T.unpack fpth)
       case (fe, isWebSuffix suff) of
@@ -312,6 +312,7 @@ ctHeader :: T.Text -> [Header]
 ctHeader "css" = [(hContentType, "text/css")]
 ctHeader "js"  = [(hContentType, "text/javascript")]
 ctHeader "txt" = [(hContentType, "text/plain")]
+ctHeader "svg" = [(hContentType, "image/svg+xml")]
 ctHeader "png" = [(hContentType, "image/png")]
 ctHeader "jpg" = [(hContentType, "image/jpeg")]
 ctHeader "pdf" = [(hContentType, "application/pdf")]
