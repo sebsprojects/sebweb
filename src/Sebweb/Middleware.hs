@@ -236,13 +236,13 @@ withCertbotACMEHandler ilq staticDir app req respond = do
 
 -- TODO: use rawPath instead, especially for valid path?
 -- TODO: Pass static dir prefix as argument from config
-withStaticFileHandler :: Middleware
-withStaticFileHandler app req respond = do
+withStaticFileHandler :: T.Text -> Middleware
+withStaticFileHandler staticDirPath app req respond = do
   now <- getCurrentTime
   let suff = fromMaybe "" $ extractPathSuffix' (pathInfo req)
   if isStaticSuffix suff && isValidPath (pathInfo req)
     then do
-      let fpth = T.intercalate "/" ("static" : pathInfo req)
+      let fpth = T.intercalate "/" (staticDirPath : pathInfo req)
       -- TODO: FILE IO
       fe <- doesFileExist (T.unpack fpth)
       case (fe, isWebSuffix suff) of

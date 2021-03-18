@@ -1,9 +1,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# OPTIONS_GHC -fno-warn-missing-fields #-}
 
 module Sebweb.Config (
-    ServerConfig
-  , cfgT
-  , cfgI
+    ServerConfig(..)
   , configFromFile
   , configFromText
 
@@ -31,6 +30,7 @@ import Network.Wai
 import Network.Wai.Handler.Warp
 import Network.Wai.Handler.WarpTLS
 
+import Sebweb.Utils
 import Sebweb.Log
 import Sebweb.LogI
 import Sebweb.Response
@@ -38,35 +38,92 @@ import Sebweb.ResponseError
 import Sebweb.Middleware
 import Sebweb.Session
 
-type ServerConfig = [(T.Text, T.Text)]
+
+data ServerConfig = ServerConfig {
+  cRevision :: T.Text
+
+, cHostName :: T.Text
+, cServerName :: T.Text
+, cHttpPort :: Int
+, cHttpsPort :: Int
+
+, cSslCertPath :: T.Text
+, cSslKeyPath :: T.Text
+, cUsersDirPath :: T.Text
+, cLogDirPath :: T.Text
+, cStaticDirPath :: T.Text
+
+, cCookieName :: T.Text
+, cMaxSessionAge :: Int
+, cMaxContentLength :: Int
+, cResponseTimeout :: Int
+
+, cLogQueueLength :: Int
+, cLogFlushInterval :: Int
+
+, cWrktSessionClearer :: Int
+, cWrkiSessionClearer :: Int
+
+, cWrktWhoisLooker :: Int
+, cWrkiWhoisLooker :: Int
+
+, cWrktLogCleaner :: Int
+, cWrkiLogCleaner :: Int
+}
 
 
 -- ------------------------------------------------------------------------
 -- Config Parsing (subset of JSON supporting only int and string)
 
-cfgT :: T.Text -> ServerConfig -> T.Text
-cfgT key config = case lookup key config of
-  Nothing -> error $ "config does not contain key=" <> T.unpack key
-  Just val -> val
+cfgT :: T.Text -> [(T.Text, T.Text)] -> Maybe T.Text
+cfgT key config = lookup key config
 
-cfgI :: T.Text -> ServerConfig -> Int
-cfgI key config = case fmap T.unpack (lookup key config) of
-  Nothing -> error $ "config does not contain key=" <> T.unpack key
-  Just val -> case readMaybe val of
-    Nothing -> error $ "config no int from val=" <> val <> " for key=" <> 
-                       T.unpack key
-    Just ival -> ival
+cfgI :: T.Text -> [(T.Text, T.Text)] -> Maybe Int
+cfgI key config = compMF2 readMaybe (fmap T.unpack) (lookup key config)
 
 -- TODO: FILE IO
 configFromFile :: FilePath -> IO (Maybe ServerConfig)
 configFromFile fp = do
   fe <- doesFileExist fp
   case fe of
-    True -> TIO.readFile fp >>= return . Just . configFromText
+    True -> TIO.readFile fp >>= return . configFromText
     False -> return Nothing
 
-configFromText :: T.Text -> ServerConfig
+-- Make sure all records of ServerConfig are present here
+-- This guarantees that all records are read from JSON
+configFromText :: T.Text -> Maybe ServerConfig
 configFromText t =
+  let dict = configPairsFromText t
+      valT key f = fmap f (cfgT key dict) -- f :: T.Text -> a
+      valI key f = fmap f (cfgI key dict) -- f :: Int -> a
+      fm f x = fromMaybe Nothing $ fmap f x
+      updM valType key updf = fm (\sc -> valType key (updf sc))
+  in updM valT "revision"           (\c v -> c { cRevision = v }) $
+     updM valT "hostName"           (\c v -> c { cHostName = v }) $
+     updM valT "serverName"         (\c v -> c { cServerName = v }) $
+     updM valI "httpPort"           (\c v -> c { cHttpPort = v }) $
+     updM valI "httpsPort"          (\c v -> c { cHttpsPort = v }) $
+     updM valT "sslCertPath"        (\c v -> c { cSslCertPath = v }) $
+     updM valT "sslKeyPath"         (\c v -> c { cSslKeyPath = v }) $
+     updM valT "usersDirPath"       (\c v -> c { cUsersDirPath = v }) $
+     updM valT "logDirPath"         (\c v -> c { cLogDirPath= v }) $
+     updM valT "staticDirPath"      (\c v -> c { cStaticDirPath = v }) $
+     updM valT "cookieName"         (\c v -> c { cCookieName = v }) $
+     updM valI "maxSessionAge"      (\c v -> c { cMaxSessionAge = v }) $
+     updM valI "maxContentLength"   (\c v -> c { cMaxContentLength= v }) $
+     updM valI "responseTimeout"    (\c v -> c { cResponseTimeout = v }) $
+     updM valI "logQueueLength"     (\c v -> c { cLogQueueLength = v }) $
+     updM valI "logFlushInterval"   (\c v -> c { cLogFlushInterval = v }) $
+     updM valI "wrktSessionClearer" (\c v -> c { cWrktSessionClearer = v }) $
+     updM valI "wrkiSessionClearer" (\c v -> c { cWrkiSessionClearer = v }) $
+     updM valI "wrktWhoisLooker"    (\c v -> c { cWrktWhoisLooker = v }) $
+     updM valI "wrkiWhoisLooker"    (\c v -> c { cWrkiWhoisLooker = v }) $
+     updM valI "wrktLogCleaner"     (\c v -> c { cWrktLogCleaner = v }) $
+     updM valI "wrkiLogCleaner"     (\c v -> c { cWrkiLogCleaner = v }) $
+     Just $ ServerConfig {}
+
+configPairsFromText :: T.Text -> [(T.Text, T.Text)]
+configPairsFromText t =
   let ls = map (T.filter configFilter) $
            dropWhile (/= "{") $
            dropWhileEnd (/= "}" ) $
@@ -85,33 +142,35 @@ parseLine l = case T.splitOn ":" l of
 -- --------------------------------------------------------------------------
 -- Application Wrappers
 
-runStandardRedirecter :: ServerConfig -> LogQueue -> ErrorPage -> IO ()
-runStandardRedirecter cfg ilq errorPage =
+runStandardRedirecter :: ServerConfig -> LogQueue -> IO ()
+runStandardRedirecter cfg ilq =
   runSettings (warpRedirectSettings cfg ilq) $
     withCommonHeaders $
-    withCertbotACMEHandler ilq (cfgT "staticDirPath" cfg) $
-    withResponseTimeoutCheck (cfgI "responseTimeout" cfg) errorPage $
-    withHeaderHostCheck (cfgT "hostName" cfg) errorPage $
-    withMethodCheck errorPage $
-    withContentLengthCheck (cfgI "maxContentLength" cfg) errorPage $
-    \req resp -> (resp $ buildFullRedirectResp (cfgT "hostName" cfg) req)
+    withCertbotACMEHandler ilq (cStaticDirPath cfg) $
+      -- Removed all middleware checks, this should be handled by
+      -- the main app once redirected
+--    withResponseTimeoutCheck (cfgI "responseTimeout" cfg) errorPage $
+--    withHeaderHostCheck (cfgT "hostName" cfg) errorPage $
+--    withMethodCheck errorPage $
+--    withContentLengthCheck (cfgI "maxContentLength" cfg) errorPage $
+    \req resp -> (resp $ buildFullRedirectResp (cHostName cfg) req)
 
 runStandardApp :: ServerConfig -> LogQueue -> LogQueue ->
                   SessionStore -> ErrorPage -> Application -> IO ()
 runStandardApp cfg ilq hlq sessionStore errorPage app = do
-  let hostName = cfgT "hostName" cfg
+  let hostName = cHostName cfg
   runTLS (warpTLSSettings cfg) (warpMainSettings cfg ilq) $
-    withRevision (cfgT "revision" cfg) $
+    withRevision (cRevision cfg) $
     withRequestLogging hlq $
     withCommonHeaders $
     withHeadRequestStripping $
-    withResponseTimeoutCheck (cfgI "responseTimeout" cfg) errorPage $
+    withResponseTimeoutCheck (cResponseTimeout cfg) errorPage $
     withHeaderHostCheck hostName errorPage $
     withMethodCheck errorPage $
-    withContentLengthCheck (cfgI "maxContentLength" cfg) errorPage $
-    withAuth ilq sessionStore (cfgT "cookieName" cfg) $
+    withContentLengthCheck (cMaxContentLength cfg) errorPage $
+    withAuth ilq sessionStore (cCookieName cfg) $
     (if hostName == "localhost" then withDev errorPage else id) $
-    withStaticFileHandler $
+    withStaticFileHandler (cStaticDirPath cfg) $
     app
 
 logStartup :: Bool -> IO ()
@@ -129,24 +188,24 @@ logStartup success = do
 
 warpRedirectSettings :: ServerConfig -> LogQueue -> Settings
 warpRedirectSettings c ilq =
-  setPort (cfgI "httpPort" c) $
-  setServerName (encodeUtf8 $ cfgT "serverName" c <> "-r") $
+  setPort (cHttpPort c) $
+  setServerName (encodeUtf8 $ cServerName c <> "-r") $
   setOnException (handleRedirectException ilq) $
   setOnExceptionResponse serveExceptionResponse $
   defaultSettings
 
 warpMainSettings :: ServerConfig -> LogQueue -> Settings
 warpMainSettings c ilq =
-  setPort (cfgI "httpsPort" c) $
-  setServerName (encodeUtf8 $ cfgT "serverName" c) $
+  setPort (cHttpsPort c) $
+  setServerName (encodeUtf8 $ cServerName c) $
   setOnException (handleWarpException ilq) $
   setOnExceptionResponse serveExceptionResponse $
   defaultSettings
 
 warpTLSSettings :: ServerConfig -> TLSSettings
 warpTLSSettings c = defaultTlsSettings {
-  certFile = T.unpack $ cfgT "sslCertPath" c
-, keyFile = T.unpack $ cfgT "sslKeyPath" c
+  certFile = T.unpack $ cSslCertPath c
+, keyFile = T.unpack $ cSslKeyPath c
 , onInsecure = DenyInsecure et }
   where et = "sebsmpu accepts only secure connections via HTTPS at this " <>
              "port. Please upgrade!"
