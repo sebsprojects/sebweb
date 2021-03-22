@@ -15,13 +15,12 @@ module Sebweb.Session (
 import Data.Time
 import Data.List
 import qualified Data.Text as T
-import Control.Monad
 import Control.Concurrent.STM
-import Control.Concurrent
 
 import Sebweb.Utils
 import Sebweb.Log
 import Sebweb.LogI
+import Sebweb.Worker
 
 
 data Session = Session {
@@ -73,22 +72,13 @@ matchesUserName t s = t == (sUser s)
 matchesToken :: T.Text -> Session -> Bool
 matchesToken t s = t == (sToken s)
 
-workerSessionClearer :: LogQueue -> SessionStore -> IO ()
-workerSessionClearer ilq ss = do
-  nowStartUp <- getCurrentTime
-  let su2AM = secondsUntilTomorrowAtHour 2 nowStartUp
-  logEnqueue ilq $ ILogData nowStartUp ILInfo ITWorker $
-    "sessionclearer: scheduling session clear for in " <>
-    (T.pack $ show su2AM) <> " seconds"
-  threadDelay (su2AM * 1000000)
-  _ <- forever $ do
-    now <- getCurrentTime
+workerSessionClearer :: ILogQueue -> Int -> SessionStore -> IO ()
+workerSessionClearer ilq startt ss =
+  dailyWorker ilq "sessionclearer" startt $ do
     sessLBefore <- readTVarIO ss >>= return . length
     removeAllExpiredSessions ss
     sessLAfter <- readTVarIO ss >>= return . length
-    logEnqueue ilq $ ILogData now ILInfo ITWorker $
+    logEnqueue ilq $ mkILogData ILInfo ITWorker $
       "sessionclearer: from " <> (T.pack $ show sessLBefore) <>
       " to " <> (T.pack $ show sessLAfter) <> " sessions"
-    threadDelay ((secondsUntilTomorrowAtHour 2 now) * 1000000)
-  return ()
 

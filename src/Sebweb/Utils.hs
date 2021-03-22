@@ -14,8 +14,8 @@ module Sebweb.Utils (
 , parseTimeHttp
 , errorTime
 , addSeconds
-, secondsUntilTomorrowAtHour
-, diffToNominalDiff
+, epochSecondsToUTCTime
+, epochDate
 
 , readRequestBody
 , addResponseHeaders
@@ -58,7 +58,9 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Base64 as B64
 import Data.Time
+import Data.Time.Clock.System
 import Data.Maybe
+import Data.Int (Int64)
 import Network.Wai
 import Network.HTTP.Types.Header
 import Crypto.Random
@@ -118,18 +120,14 @@ errorTime = UTCTime (fromGregorian 2000 1 1) 0
 addSeconds :: Int -> UTCTime -> UTCTime
 addSeconds s tim = addUTCTime (realToFrac s) tim
 
--- Calculates the seconds until tomorrow at hour (specified as 0..23)
-secondsUntilTomorrowAtHour :: Int -> UTCTime -> Int
-secondsUntilTomorrowAtHour hour now =
-  let tomorrow = addUTCTime (fromIntegral (86400 :: Int)) now
-      (y, m, d) = toGregorian (utctDay $ tomorrow)
-      tomorrowAtHour = UTCTime (fromGregorian y m d)
-                               (fromIntegral $ hour * 60 * 60)
-  in floor $ diffUTCTime tomorrowAtHour now
+epochSecondsToUTCTime :: Int64 -> UTCTime
+epochSecondsToUTCTime s =
+  let (days, secs) = s `divMod` 86400
+      day = addDays (fromIntegral days) systemEpochDay
+  in UTCTime day (secondsToDiffTime $ fromIntegral secs)
 
-diffToNominalDiff :: DiffTime -> NominalDiffTime
-diffToNominalDiff = fromRational . toRational
-
+epochDate :: UTCTime
+epochDate = UTCTime systemEpochDay 0
 
 -- ---------------------------------------------------------------------------
 -- Request / Response Utility

@@ -1,5 +1,7 @@
 module Sebweb.LogH (
     HLogData(..)
+  , HLogQueue
+  , mkHLogData
 
   , HLogQuery(..)
   , hLogPerformQuery
@@ -36,7 +38,15 @@ data HLogData = HLogData {
 instance LogData HLogData where
   isCritical _ = False
   assembleLogLine = assembleHttpLogLine
+  getTimestamp = hldTime
+  setTimestamp tim hld = hld { hldTime = tim }
 
+type HLogQueue = LogQueue HLogData
+
+mkHLogData :: Maybe T.Text -> T.Text -> T.Text -> T.Text -> T.Text ->
+              Maybe T.Text -> Maybe T.Text -> Maybe T.Text -> Bool -> Bool ->
+              Maybe T.Text -> HLogData
+mkHLogData = HLogData epochDate
 
 -- ------------------------------------------------------------------------
 -- HTTP Log Line Construction

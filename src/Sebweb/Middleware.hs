@@ -56,9 +56,8 @@ withRevision rev app req respond = do
   app (req { vault = v }) respond
 
 -- TODO: Re-set cookie if invalid / expired
-withAuth :: LogQueue -> SessionStore -> T.Text -> Middleware
+withAuth :: ILogQueue -> SessionStore -> T.Text -> Middleware
 withAuth ilq ss cn app req respond = do
-  now <- getCurrentTime
   let mCookieText = fmap decodeUtf8' (lookup hCookie (requestHeaders req))
   case mCookieText of
     Just (Right cookieText) -> do
@@ -66,23 +65,24 @@ withAuth ilq ss cn app req respond = do
       case lookup cn cookies of
         Just v -> do
           mSess <- querySessionStore ss v
+          now <- getCurrentTime
           case mSess of
             Just s -> do
               case isExpiredSession now s of
                 False -> do
                   insertAuthAndPass (AuthAuthorized (sUser s))
                 True -> do
-                  logAuth now ILInfo "auth: session expired"
+                  logAuth ILInfo "auth: session expired"
                   removeSessionByToken ss v
                   insertAuthAndResetCookie now AuthUnauthorized
             Nothing -> do
-              logAuth now ILInfo "auth: session not found"
+              logAuth ILInfo "auth: session not found"
               insertAuthAndResetCookie now AuthUnauthorized
         Nothing -> do
-          logAuth now ILCrit $ "auth: invalid cookie: " <> T.take 64 cookieText
+          logAuth ILCrit $ "auth: invalid cookie: " <> T.take 64 cookieText
           insertAuthAndPass AuthVisitor
     Just (Left _) -> do
-      logAuth now ILCrit "auth: invalid cookie: error on decodeUtf8"
+      logAuth ILCrit "auth: invalid cookie: error on decodeUtf8"
       insertAuthAndPass AuthVisitor
     Nothing -> insertAuthAndPass AuthVisitor
   where insertAuthAndPass auth = do
@@ -92,14 +92,12 @@ withAuth ilq ss cn app req respond = do
           let v = Vault.insert authKey auth (vault req)
           app (req { vault = v }) $
             respond . (setCookieIfUnset (emptyCookieBS cn now))
-        logAuth now level msg = logEnqueue ilq $ ILogData now level ITAuth msg
+        logAuth level msg = logEnqueue ilq $ mkILogData level ITAuth msg
 
-withRequestLogging :: LogQueue -> Middleware
+withRequestLogging :: HLogQueue -> Middleware
 withRequestLogging hlq app req respond = app req $ \r -> do
-  now <- getCurrentTime
   mHostName <- getHostName req
-  logEnqueue hlq $ HLogData
-    now
+  logEnqueue hlq $ mkHLogData
     mHostName
     ("HTTP/" <> versionToText (httpVersion req))
     (decodeUtf8Ignore $ requestMethod req)
@@ -214,9 +212,8 @@ withDev err app req respond = do
 -- ------------------------------------------------------------------------
 -- Standalone Handlers
 
-withCertbotACMEHandler :: LogQueue -> T.Text -> Middleware
+withCertbotACMEHandler :: ILogQueue -> T.Text -> Middleware
 withCertbotACMEHandler ilq staticDir app req respond = do
-  now <- getCurrentTime
   case (isValidPath $ pathInfo req, pathInfo req) of
     (True, ".well-known" : "acme-challenge" : _) -> do
       let fpth = T.intercalate "/" (staticDir : (pathInfo req))
@@ -224,21 +221,20 @@ withCertbotACMEHandler ilq staticDir app req respond = do
       fe <- doesFileExist (T.unpack fpth)
       case fe of
         True -> do
-          logACME now ILInfo "acme: successfully serving acme challenge"
+          logACME ILInfo "acme: successfully serving acme challenge"
           -- TODO: Add headers?
           respond $ fileResponse fpth []
         False -> do
-          logACME now ILCrit ("acme: challenge invalid file path: " <>
-                              safeLast "" (pathInfo req))
+          logACME ILCrit ("acme: challenge invalid file path: " <>
+                          safeLast "" (pathInfo req))
           app req respond
     _ -> app req respond
-  where logACME tim l m = logEnqueue ilq $ ILogData tim l ITOther m
+  where logACME l m = logEnqueue ilq $ mkILogData l ITOther m
 
 -- TODO: use rawPath instead, especially for valid path?
 -- TODO: Pass static dir prefix as argument from config
 withStaticFileHandler :: T.Text -> Middleware
 withStaticFileHandler staticDirPath app req respond = do
-  now <- getCurrentTime
   let suff = fromMaybe "" $ extractPathSuffix' (pathInfo req)
   if isStaticSuffix suff && isValidPath (pathInfo req)
     then do
@@ -246,10 +242,12 @@ withStaticFileHandler staticDirPath app req respond = do
       -- TODO: FILE IO
       fe <- doesFileExist (T.unpack fpth)
       case (fe, isWebSuffix suff) of
-        (True, True) ->
+        (True, True) -> do
+          now <- getCurrentTime
           respond $ addResponseHeaders (ctHeader suff) $ serveWebFile fpth now
         (True, False) -> do
           -- TODO: FILE IO
+          now <- getCurrentTime
           modTim <- getModificationTime (T.unpack fpth)
           respond $ addResponseHeaders (ctHeader suff) $
                     serveStaticFile fpth now modTim (requestHeaders req)

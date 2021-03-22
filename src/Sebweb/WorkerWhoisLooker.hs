@@ -16,7 +16,6 @@ import qualified Data.Text.IO as TIO
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as B8
 import Control.Exception
-import Control.Monad
 import Control.Concurrent
 import Network.Socket
 import Network.Socket.ByteString
@@ -24,47 +23,41 @@ import Network.Socket.ByteString
 import Sebweb.Utils
 import Sebweb.Log
 import Sebweb.LogI
+import Sebweb.Worker
 
 
 -- --------------------------------------------------------------------------
 -- Top Level Worker Thread and Looker
 
-workerWhoisLooker :: LogQueue -> T.Text -> IO ()
-workerWhoisLooker ilq logDir = do
-  nowStartUp <- getCurrentTime
-  let su1AM = secondsUntilTomorrowAtHour 1 nowStartUp
-  logEnqueue ilq $ ILogData nowStartUp ILInfo ITWorker $
-    "whoislooker: scheduling whois lookup for in " <> (T.pack $ show su1AM) <>
-    " seconds"
-  threadDelay(su1AM * 1000000)
-  _ <- forever $ do
+workerWhoisLooker :: ILogQueue -> Int -> T.Text -> T.Text -> IO ()
+workerWhoisLooker ilq startt logDir hSuff =
+  dailyWorker ilq "whoislooker" startt $ do
     now <- getCurrentTime
-    _ <- forkIO $ whoisLooker ilq logDir
-    threadDelay((secondsUntilTomorrowAtHour 1 now) * 1000000)
-  return ()
-
-whoisLooker :: LogQueue -> T.Text -> IO ()
-whoisLooker ilq logDir = do
-  now <- getCurrentTime
-  let yesterday = addUTCTime (fromIntegral (-86400 :: Int)) now
-  logEnqueue ilq $ ILogData now ILInfo ITWorker
-    "whoislooker: starting whois lookups"
-  let logPath = T.unpack logDir <> "/" <> tf yesterday <> "_httplog.txt"
-  -- TODO: FILE IO
-  ips <- bracket (openFile logPath ReadMode) hClose (flip gatherIps $ [])
-  ipLocs <- mapM (\ip -> issueWhoisQuery ilq ip) ips
-  let ipCountryPairs = concat $ map makeIpCountryPair ipLocs
-  -- TEMP: Write out the full whois query result to a separate file
-  -- let tempPath = T.unpack logDir <> "/" <> tf yesterday <> "_whoislog.txt"
-  --_ <- bracket (openFile tempPath WriteMode) hClose $ \h -> do
-  --  let xs = map (\(ip, ipLoc) -> ("ip", ip) : ipLoc) ipLocs
-  --  let wlns = map (\ent -> T.intercalate "," (entToLine ent)) xs
-  --  mapM_ (TIO.hPutStrLn h) wlns
-  updateLogFile logPath ipCountryPairs
-  nowEnd <- getCurrentTime
-  logEnqueue ilq $ ILogData nowEnd ILInfo ITWorker $
-    "whoislooker: finished with " <> (T.pack $ show $ length ips) <>
-    " whois lookups"
+    let yesterday = addUTCTime (fromIntegral (-86400 :: Int)) now
+    logEnqueue ilq $ mkILogData ILInfo ITWorker
+      "whoislooker: starting whois lookups"
+    let logFP = T.unpack logDir <> "/" <> tf yesterday <> T.unpack hSuff
+    -- TODO: FILE IO
+    fe <- doesFileExist logFP
+    case fe of
+      False ->
+        logEnqueue ilq $ mkILogData ILError ITWorker $
+          "whoislooker: could not find yesterdays log with path " <>
+          T.pack logFP
+      True -> do
+        ips <- bracket (openFile logFP ReadMode) hClose (flip gatherIps $ [])
+        ipLocs <- mapM (\ip -> issueWhoisQuery ilq ip) ips
+        let ipCountryPairs = concat $ map makeIpCountryPair ipLocs
+        -- TEMP: Write out the full whois query result to a separate file
+        -- let tempPath = T.unpack logDir <> "/" <> tf yesterday <> "_whoislog.txt"
+        --_ <- bracket (openFile tempPath WriteMode) hClose $ \h -> do
+        --  let xs = map (\(ip, ipLoc) -> ("ip", ip) : ipLoc) ipLocs
+        --  let wlns = map (\ent -> T.intercalate "," (entToLine ent)) xs
+        --  mapM_ (TIO.hPutStrLn h) wlns
+        updateLogFile logFP ipCountryPairs
+        logEnqueue ilq $ mkILogData ILInfo ITWorker $
+          "whoislooker: finished with " <> (T.pack $ show $ length ips) <>
+          " whois lookups"
   where tf = formatTime defaultTimeLocale "%F"
         makeIpCountryPair (ip, locs) = case lookup "country" locs of
                                               Nothing -> []
@@ -88,10 +81,10 @@ updateLogFile logPath ipLocs = do
   removeFile logPath
   renameFile (logPath <> ".new") logPath
 
-issueWhoisQuery :: LogQueue -> T.Text -> IO (T.Text, IPInfo)
+issueWhoisQuery :: ILogQueue -> T.Text -> IO (T.Text, IPInfo)
 issueWhoisQuery ilq ipText = do
   mLoc <- timeout (1 * 1000000) $ whoisQueryRec ilq ipText
-  threadDelay(1 * 1000000)
+  threadDelay (1 * 1000000)
   return (ipText, fromMaybe [] mLoc)
 
 gatherIps :: Handle -> [T.Text] -> IO [T.Text]
@@ -116,13 +109,13 @@ writeBackLogLines hOld hNew ipLocs = do
 updateLine :: T.Text -> IPInfo -> T.Text
 updateLine l ipLocs = case extractIp l of
   [ip] -> case lookup ip ipLocs of
-    Just c -> l <> "," <> c <> "\n"
-    Nothing -> l <> "," <> "\n"
-  _ -> l <> "," <> "\n"
+    Just c -> l <> c <> "\n"
+    Nothing -> l <> "\n"
+  _ -> l <> "\n"
+
 
 -- --------------------------------------------------------------------------
 -- Constants and dealing with host names
-
 
 type IPInfo = [(T.Text, T.Text)]
 
@@ -174,7 +167,7 @@ mStripSuffixText pref t = applyIgnoreNothing (T.stripSuffix pref) t
 -- --------------------------------------------------------------------------
 -- Main Whois
 
-whoisQueryRec :: LogQueue -> T.Text -> IO IPInfo
+whoisQueryRec :: ILogQueue -> T.Text -> IO IPInfo
 whoisQueryRec ilq ip = do
   arinInfo <- whoisQuery ilq arinServer ip
   case fmap stripRef $ lookup "referralserver" arinInfo of
@@ -189,7 +182,7 @@ whoisQueryRec ilq ip = do
                         [("refcount", T.pack $ show (c :: Int))]
         stripRef = (mStripPrefixText "whois://")
 
-whoisQuery :: LogQueue -> T.Text -> T.Text -> IO IPInfo
+whoisQuery :: ILogQueue -> T.Text -> T.Text -> IO IPInfo
 whoisQuery ilq server ip = do
   mresp <- makeWhoisQuery ilq (T.unpack server) (T.unpack ip)
   return $ parseWhoisResponse (T.pack $ B8.unpack $ fromMaybe "" mresp)
@@ -225,7 +218,7 @@ tryKeys keys t =
 -- --------------------------------------------------------------------------
 -- Low level socket operations
 
-makeWhoisQuery :: LogQueue -> String -> String ->
+makeWhoisQuery :: ILogQueue -> String -> String ->
                   IO (Maybe BS.ByteString)
 makeWhoisQuery ilq server ipString = withSocketsDo $ do
   maddr <- resolve server whoisPort

@@ -33,6 +33,7 @@ import Network.Wai.Handler.WarpTLS
 import Sebweb.Utils
 import Sebweb.Log
 import Sebweb.LogI
+import Sebweb.LogH
 import Sebweb.Response
 import Sebweb.ResponseError
 import Sebweb.Middleware
@@ -62,13 +63,8 @@ data ServerConfig = ServerConfig {
 , cLogFlushInterval :: Int
 
 , cWrktSessionClearer :: Int
-, cWrkiSessionClearer :: Int
-
 , cWrktWhoisLooker :: Int
-, cWrkiWhoisLooker :: Int
-
 , cWrktLogCleaner :: Int
-, cWrkiLogCleaner :: Int
 }
 
 
@@ -115,11 +111,8 @@ configFromText t =
      updM valI "logQueueLength"     (\c v -> c { cLogQueueLength = v }) $
      updM valI "logFlushInterval"   (\c v -> c { cLogFlushInterval = v }) $
      updM valI "wrktSessionClearer" (\c v -> c { cWrktSessionClearer = v }) $
-     updM valI "wrkiSessionClearer" (\c v -> c { cWrkiSessionClearer = v }) $
      updM valI "wrktWhoisLooker"    (\c v -> c { cWrktWhoisLooker = v }) $
-     updM valI "wrkiWhoisLooker"    (\c v -> c { cWrkiWhoisLooker = v }) $
      updM valI "wrktLogCleaner"     (\c v -> c { cWrktLogCleaner = v }) $
-     updM valI "wrkiLogCleaner"     (\c v -> c { cWrkiLogCleaner = v }) $
      Just $ ServerConfig {}
 
 configPairsFromText :: T.Text -> [(T.Text, T.Text)]
@@ -142,7 +135,7 @@ parseLine l = case T.splitOn ":" l of
 -- --------------------------------------------------------------------------
 -- Application Wrappers
 
-runStandardRedirecter :: ServerConfig -> LogQueue -> IO ()
+runStandardRedirecter :: ServerConfig -> ILogQueue -> IO ()
 runStandardRedirecter cfg ilq =
   runSettings (warpRedirectSettings cfg ilq) $
     withCommonHeaders $
@@ -155,7 +148,7 @@ runStandardRedirecter cfg ilq =
 --    withContentLengthCheck (cfgI "maxContentLength" cfg) errorPage $
     \req resp -> (resp $ buildFullRedirectResp (cHostName cfg) req)
 
-runStandardApp :: ServerConfig -> LogQueue -> LogQueue ->
+runStandardApp :: ServerConfig -> ILogQueue -> HLogQueue ->
                   SessionStore -> ErrorPage -> Application -> IO ()
 runStandardApp cfg ilq hlq sessionStore errorPage app = do
   let hostName = cHostName cfg
@@ -186,7 +179,7 @@ logStartup success = do
 -- --------------------------------------------------------------------------
 -- Warp Settings
 
-warpRedirectSettings :: ServerConfig -> LogQueue -> Settings
+warpRedirectSettings :: ServerConfig -> ILogQueue -> Settings
 warpRedirectSettings c ilq =
   setPort (cHttpPort c) $
   setServerName (encodeUtf8 $ cServerName c <> "-r") $
@@ -194,7 +187,7 @@ warpRedirectSettings c ilq =
   setOnExceptionResponse serveExceptionResponse $
   defaultSettings
 
-warpMainSettings :: ServerConfig -> LogQueue -> Settings
+warpMainSettings :: ServerConfig -> ILogQueue -> Settings
 warpMainSettings c ilq =
   setPort (cHttpsPort c) $
   setServerName (encodeUtf8 $ cServerName c) $
@@ -214,15 +207,13 @@ warpTLSSettings c = defaultTlsSettings {
 -- ------------------------------------------------------------------------
 -- Exceptions handling for warp-internal
 
-handleWarpException :: LogQueue -> Maybe Request -> SomeException -> IO ()
-handleWarpException ilq _ e = do
-  now <- getCurrentTime
-  logEnqueue ilq $ ILogData now ILError ITWarp ("warp: " <> (T.pack $ show e))
+handleWarpException :: ILogQueue -> Maybe Request -> SomeException -> IO ()
+handleWarpException ilq _ e =
+  logEnqueue ilq $ mkILogData ILError ITWarp ("warp: " <> (T.pack $ show e))
 
-handleRedirectException :: LogQueue -> Maybe Request -> SomeException -> IO ()
-handleRedirectException ilq _ e = do
-  now <- getCurrentTime
-  logEnqueue ilq $ ILogData now ILError ITWarp ("warpre: " <> (T.pack $ show e))
+handleRedirectException :: ILogQueue -> Maybe Request -> SomeException -> IO ()
+handleRedirectException ilq _ e =
+  logEnqueue ilq $ mkILogData ILError ITWarp ("warpre: " <> (T.pack $ show e))
 
 -- Basically same as Warp's defaultOnExceptionResponse
 -- TODO: Handle HTTP2 ConnectionError like in ^

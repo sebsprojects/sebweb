@@ -7,7 +7,7 @@ license:              BSD3
 license-file:         LICENSE
 author:               Sebastian Kreisel
 maintainer:           seb@elfeck.com
-copyright:            Copyright: (c) 2020 Sebastian Kreisel
+copyright:            Copyright: (c) 2021 Sebastian Kreisel
 category:             web
 build-type:           Simple
 cabal-version:        >= 1.10
@@ -32,6 +32,7 @@ library
                       , Sebweb.Log
                       , Sebweb.LogI
                       , Sebweb.LogH
+                      , Sebweb.Worker
                       , Sebweb.WorkerLogCleaner
                       , Sebweb.WorkerWhoisLooker
                       , Sebweb.Response
@@ -53,6 +54,5 @@ library
                       , binary
                       , vault
                       , stm
-                      , network
                       , cryptonite
                       , process

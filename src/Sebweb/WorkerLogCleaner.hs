@@ -4,8 +4,6 @@ module Sebweb.WorkerLogCleaner (
 
 import System.IO
 import System.Directory
-import Control.Concurrent
-import Control.Monad
 import Control.Exception
 import Data.Time
 import Data.Maybe
@@ -16,49 +14,41 @@ import qualified Data.Text.IO as TIO
 import Sebweb.Utils
 import Sebweb.Log
 import Sebweb.LogI
+import Sebweb.Worker
 
 
 -- ---------------------------------------------------------------------------
 -- Worker and related high level functions
 
-workerLogCleaner :: LogQueue -> T.Text -> T.Text -> IO ()
-workerLogCleaner ilq logDir storDir = do
-  -- TODO: FILE IO
-  createDirectoryIfMissing False (T.unpack storDir)
-  createDirectoryIfMissing False (T.unpack $ logDir <> "/trash")
-  nowStartUp <- getCurrentTime
-  let su3AM = secondsUntilTomorrowAtHour 3 nowStartUp
-  logEnqueue ilq $ ILogData nowStartUp ILInfo ITWorker $
-    "logcleaner: scheduling log cleaning for in " <> (T.pack $ show su3AM) <>
-    " seconds"
-  threadDelay (su3AM * 1000000)
-  _ <- forever $ do
-    now <- getCurrentTime
-    logCleaner ilq logDir storDir "_internallog.txt"
-    logCleaner ilq logDir storDir "_httplog.txt"
-    threadDelay ((secondsUntilTomorrowAtHour 3 now) * 1000000)
-  return ()
+workerLogCleaner :: ILogQueue -> Int ->
+                    T.Text -> T.Text -> T.Text -> T.Text -> T.Text ->IO ()
+workerLogCleaner ilq startt logDir storDir trashDir iSuff hSuff = do
+  dailyWorker ilq "logcleaner" startt $ do
+    -- TODO: FILE IO
+    createDirectoryIfMissing False (T.unpack storDir)
+    createDirectoryIfMissing False (T.unpack trashDir)
+    logCleaner ilq logDir storDir trashDir iSuff
+    logCleaner ilq logDir storDir trashDir hSuff
 
 -- Attempts to clean log files up to 12 months back
-logCleaner :: LogQueue -> T.Text -> T.Text -> T.Text -> IO ()
-logCleaner ilq logDir storDir suff = do
+logCleaner :: ILogQueue -> T.Text -> T.Text -> T.Text -> T.Text -> IO ()
+logCleaner ilq logDir storDir trashDir suff = do
   now <- getCurrentTime
   let ms = monthList now 12 10
-  mapM_ (\(y,m) -> (cleanLog ilq (mkFil y m) logDir (mkPth y m))) ms
+  mapM_ (\(y,m) -> (cleanYM ilq (mkFil y m) logDir trashDir (mkPth y m))) ms
   where mkPth y m = storDir <> "/" <> y <> "-" <> m <> suff
-        mkFil y m t = dateFilter y m t &&
-                     (typeFilter "internal" suff t || typeFilter "http" suff t)
+        mkFil y m t = dateFilter y m t && typeFilter suff t
 
-cleanLog :: LogQueue -> (T.Text -> Bool) -> T.Text -> T.Text -> IO ()
-cleanLog ilq fil logDir storFile = do
-  now <- getCurrentTime
+-- Collects (day)logs matching y m and suff
+cleanYM :: ILogQueue -> (T.Text -> Bool) -> T.Text -> T.Text -> T.Text -> IO ()
+cleanYM ilq fil logDir trashDir storFile = do
   -- TODO: FILE IO
   logs <- listDirectory (T.unpack logDir) >>=
           return . sort . (filter fil) . (map T.pack)
   case null logs of
     True -> return ()
     False -> do
-      logEnqueue ilq $ ILogData now ILInfo ITWorker $
+      logEnqueue ilq $ mkILogData ILInfo ITWorker $
         "logcleaner: filter matching " <> T.pack (show $ length logs) <>
         " log files, starting cleaning"
       -- TODO: FILE IO
@@ -66,11 +56,10 @@ cleanLog ilq fil logDir storFile = do
         (openFile (T.unpack storFile) WriteMode)
         (hClose)
         (\h -> mapM_ (appendLogFile logDir h) logs)
-      let trashDir = logDir <> "/trash"
-      mapM_ (\f -> renameFile (prepDir logDir f) (prepDir trashDir f)) logs
-      logEnqueue ilq $ ILogData now ILInfo ITWorker
-                                      "logcleaner: cleaning successful"
-  where prepDir d f = T.unpack $ d <> "/" <> f
+      mapM_ (\f -> renameFile (mkFilNam logDir f) (mkFilNam trashDir f)) logs
+      logEnqueue ilq $ mkILogData ILInfo ITWorker
+        "logcleaner: cleaning successful"
+  where mkFilNam d f = T.unpack $ d <> "/" <> f
 
 
 -- ---------------------------------------------------------------------------
@@ -107,8 +96,8 @@ dateFilter year month t =
             Just (y : m:_:[]) -> y == year && m == month
             _ -> False
 
-typeFilter :: T.Text -> T.Text -> T.Text -> Bool
-typeFilter typ suff t = T.isInfixOf typ suff && T.isInfixOf typ t
+typeFilter :: T.Text -> T.Text -> Bool
+typeFilter suff t = T.isSuffixOf suff t
 
 -- Enumerates (Y,m) starting at (now - dBuf) backward for numMonths
 monthList :: UTCTime -> Integer -> Integer -> [(T.Text, T.Text)]

@@ -16,6 +16,7 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM
 import Control.Monad
 import Data.Time
+import Data.Time.Clock.System
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -26,26 +27,28 @@ import Sebweb.Utils
 -- ------------------------------------------------------------------------
 -- Log Enqueue and Write
 
-type LogQueue = TBQueue T.Text
-
 class LogData a where
   isCritical :: a -> Bool
   assembleLogLine :: a -> T.Text
+  getTimestamp :: a -> UTCTime
+  setTimestamp :: UTCTime -> a -> a
 
+type LogQueue a = TBQueue a
 
-logCreateQueue :: Int -> IO LogQueue
+logCreateQueue :: Int -> IO (LogQueue a)
 logCreateQueue = atomically . newTBQueue . fromIntegral
 
 logDirect :: (LogData a) => Handle -> a -> IO ()
-logDirect h ld  = TIO.hPutStr h (assembleLogLine ld) >> hFlush h
+logDirect h ld  = do
+  TIO.hPutStr h (assembleLogLine ld) >> hFlush h
 
-logEnqueue :: (LogData a) => LogQueue -> a -> IO ()
-logEnqueue ilq ld = do
-  let ll = assembleLogLine ld
-  if isCritical ld then TIO.hPutStr stderr ll else return ()
-  atomically $ writeTBQueue ilq ll
+logEnqueue :: (LogData a) => LogQueue a -> a -> IO ()
+logEnqueue lq ld = do
+  st <- getSystemTime
+  atomically $ writeTBQueue lq $
+    setTimestamp (epochSecondsToUTCTime (systemSeconds st)) ld
 
-workerLogWriter :: T.Text -> T.Text -> Int -> LogQueue -> IO ()
+workerLogWriter :: (LogData a) => T.Text -> T.Text -> Int -> LogQueue a -> IO ()
 workerLogWriter logDir fileSuffix logInterval lq = do
   _ <- forever $ do
     threadDelay (logInterval * 1000000)
@@ -57,10 +60,10 @@ workerLogWriter logDir fileSuffix logInterval lq = do
     hClose h
   return ()
 
-logFlush :: LogQueue -> Handle -> IO ()
+logFlush :: (LogData a) => LogQueue a -> Handle -> IO ()
 logFlush lq h = do
   ls <- atomically $ flushTBQueue lq
-  mapM_ (TIO.hPutStr h) ls >> hFlush h
+  mapM_ ((TIO.hPutStr h) . assembleLogLine) ls >> hFlush h
 
 
 -- ------------------------------------------------------------------------

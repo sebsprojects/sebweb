@@ -2,6 +2,8 @@ module Sebweb.LogI (
     ILogLevel(..)
   , ILogType(..)
   , ILogData(..)
+  , ILogQueue
+  , mkILogData
 
   , ILogQuery(..)
   , iLogPerformQuery
@@ -44,6 +46,8 @@ data ILogData = ILogData {
 instance LogData ILogData where
   isCritical (ILogData _ level _ _) = level == ILCrit
   assembleLogLine = assembleILogLine
+  getTimestamp = ildTime
+  setTimestamp tim ild = ild { ildTime = tim }
 
 assembleILogLine :: ILogData -> T.Text
 assembleILogLine ild = T.intercalate "," itms <> "\n"
@@ -51,6 +55,11 @@ assembleILogLine ild = T.intercalate "," itms <> "\n"
                , T.pack $ show (ildLevel ild)
                , T.pack  $ show (ildType ild)
                , encodeCSV 512 $ ildMessage ild ]
+
+type ILogQueue = LogQueue ILogData
+
+mkILogData :: ILogLevel -> ILogType -> T.Text -> ILogData
+mkILogData = ILogData epochDate
 
 
 -- ------------------------------------------------------------------------
