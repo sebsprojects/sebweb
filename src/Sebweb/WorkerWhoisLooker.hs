@@ -270,4 +270,3 @@ whileM :: Monad m => (a -> Bool) -> [a] -> m a -> a -> m [a]
 whileM cond acc f x
   | cond x = f >>= \y -> whileM cond (acc ++ [y]) f y
   | otherwise = return acc
-

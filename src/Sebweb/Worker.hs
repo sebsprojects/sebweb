@@ -16,10 +16,9 @@ dailyWorker ilq name startt task = do
   logEnqueue ilq $ ILogData now ILInfo ITWorker $
     name <> ": init; scheduled first task in " <>
     (T.pack $ show $ startt + secondsUntilMidnight now) <> " seconds"
-  threadDelayUntilSecAfterMidnight (startt * 1000000)
   _ <- forever $ do
-    task
     threadDelayUntilSecAfterMidnight startt
+    task
   return ()
 
 threadDelayUntilSecAfterMidnight :: Int -> IO ()
