@@ -11,7 +11,6 @@ import Data.List
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 
-import Sebweb.Utils
 import Sebweb.Log
 import Sebweb.LogI
 import Sebweb.Worker
@@ -34,10 +33,15 @@ workerLogCleaner ilq startt logDir storDir trashDir iSuff hSuff = do
 logCleaner :: ILogQueue -> T.Text -> T.Text -> T.Text -> T.Text -> IO ()
 logCleaner ilq logDir storDir trashDir suff = do
   now <- getCurrentTime
-  let ms = monthList now 12 10
-  mapM_ (\(y,m) -> (cleanYM ilq (mkFil y m) logDir trashDir (mkPth y m))) ms
-  where mkPth y m = storDir <> "/" <> y <> "-" <> m <> suff
-        mkFil y m t = dateFilter y m t && typeFilter suff t
+  let dBuf = 10
+  let monthsBack = 12
+  let ms = monthList now monthsBack (fromIntegral dBuf)
+  return ()
+  mapM_ (\(y,m) -> (cleanYM ilq (mkFil y m now dBuf) logDir trashDir (mkPth y m))) ms
+  where mkPth y m = storDir <> "/" <> (T.pack $ show y) <> "-" <> padNum m <> suff
+        mkFil y m now dBuf t = dateFilter y m t && typeFilter suff t &&
+                               currentMonthDayFilter now dBuf t
+
 
 -- Collects (day)logs matching y m and suff
 cleanYM :: ILogQueue -> (T.Text -> Bool) -> T.Text -> T.Text -> T.Text -> IO ()
@@ -89,24 +93,41 @@ processLines hStor hLog = do
 -- ---------------------------------------------------------------------------
 -- Filters and Utility
 
-dateFilter :: T.Text -> T.Text -> T.Text -> Bool
+-- Checks if t contains year and month
+dateFilter :: Int -> Int -> T.Text -> Bool
 dateFilter year month t =
-          let mtoks = fmap (T.splitOn "-") (listToMaybe (T.splitOn "_" t))
-          in case mtoks of
-            Just (y : m:_:[]) -> y == year && m == month
-            _ -> False
+  let mtoks = fmap (T.splitOn "-") (listToMaybe (T.splitOn "_" t))
+  in case mtoks of
+    Just (y : m : _ : []) -> y == (T.pack $ show year) &&
+                             m == (padNum month)
+    _ -> False
+
+-- Given the current date and dayBuffer, checks that if t contains the current
+-- month, that day does not violate the day buffer
+currentMonthDayFilter :: UTCTime -> Int -> T.Text -> Bool
+currentMonthDayFilter now dBuf t =
+  let mtoks = fmap (T.splitOn "-") (listToMaybe (T.splitOn "_" t))
+      (currentYear, currentMonth, currentDay) = toGregorian (utctDay now)
+      daysT = map padNum [1..(max 0 (currentDay - dBuf))]
+  in case mtoks of
+    Just (y : m : d : []) | padNum currentMonth == m &&
+                            (T.pack $ show currentYear) == y -> d `elem` daysT
+                          | otherwise -> True
+    _ -> False
 
 typeFilter :: T.Text -> T.Text -> Bool
 typeFilter suff t = T.isSuffixOf suff t
 
+padNum :: Int -> T.Text
+padNum m | m < 9 = T.pack $ "0" <> show m
+         | otherwise = T.pack $ show m
+
 -- Enumerates (Y,m) starting at (now - dBuf) backward for numMonths
-monthList :: UTCTime -> Integer -> Integer -> [(T.Text, T.Text)]
+monthList :: UTCTime -> Integer -> Integer -> [(Int, Int)]
 monthList now numMonths dBuf =
   let (_, currentMonth, _) = toGregorian (utctDay now)
       (_, potStartMonth, _) = toGregorian (addDays (-dBuf) $ utctDay now)
       start = if currentMonth == potStartMonth then 0 else 1
       ms = map (\d -> addGregorianMonthsClip (-d) (utctDay now))
           [start .. (numMonths + start - 1)]
-      ss = map (\t -> T.pack $ formatTime defaultTimeLocale "%Y-%m" t) ms
-  in map ((\t -> (safeHead "" t, safeLast "" t)) . (T.splitOn "-")) ss
-
+  in map (\t -> (let (y, m, _) = toGregorian t in (fromIntegral y, m))) ms
