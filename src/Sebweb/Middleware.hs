@@ -43,8 +43,7 @@ import Sebweb.Log
 import Sebweb.LogI
 import Sebweb.LogH
 import Sebweb.Session
-import Sebweb.Response
-import Sebweb.ResponseError
+import Sebweb.ResponseCommon
 
 
 -- ------------------------------------------------------------------------

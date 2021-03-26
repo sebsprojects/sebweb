@@ -35,8 +35,8 @@ library
                       , Sebweb.Worker
                       , Sebweb.WorkerLogCleaner
                       , Sebweb.WorkerWhoisLooker
+                      , Sebweb.ResponseCommon
                       , Sebweb.Response
-                      , Sebweb.ResponseError
                       , Sebweb.Session
                       , Sebweb.Middleware
   build-depends:      base

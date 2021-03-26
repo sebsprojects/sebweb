@@ -34,8 +34,7 @@ import Sebweb.Utils
 import Sebweb.Log
 import Sebweb.LogI
 import Sebweb.LogH
-import Sebweb.Response
-import Sebweb.ResponseError
+import Sebweb.ResponseCommon
 import Sebweb.Middleware
 import Sebweb.Session
 
