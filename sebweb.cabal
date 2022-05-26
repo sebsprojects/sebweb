@@ -39,6 +39,10 @@ library
                       , Sebweb.Response
                       , Sebweb.Session
                       , Sebweb.Middleware
+                      , Sebweb.ToggleQuery
+                      , Sebweb.View
+                      , Sebweb.ViewLogh
+                      , Sebweb.ViewLogi
   build-depends:      base
                       , time >= 1.9.1
                       , text

@@ -3,6 +3,11 @@ module Sebweb.View (
   , makeRevisionedLink
 ) where
 
+import Prelude hiding (div, id, head)
+import qualified Data.Text as T
+--import Text.Blaze.Html5 hiding (style, map, code)
+--import Text.Blaze.Html5.Attributes hiding (form, title, max)
+
 
 makeRelativeLink :: T.Text -> T.Text -> T.Text
 makeRelativeLink pth ln = pref <> "/" <> ln

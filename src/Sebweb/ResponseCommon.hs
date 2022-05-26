@@ -8,6 +8,7 @@ module Sebweb.ResponseCommon (
   , buildFullRedirectResp
 
   , ErrorPage
+  , HtmlWrapper
   , errorResp
   , htmlErrorResp
   , htmlErrorResp'
@@ -16,6 +17,8 @@ module Sebweb.ResponseCommon (
   , plainErrorResp
   , buildErrorResp
   , buildErrorResp'
+
+  , standardErrorMessage
 ) where
 
 import qualified Data.Text as T
@@ -68,6 +71,7 @@ buildFullRedirectResp host req =
 -- Error Response (general, html, json, plain)
 
 type ErrorPage = RequestData -> Status -> Maybe T.Text -> T.Text -> Html
+type HtmlWrapper = Html -> Html
 
 
 errorResp :: ErrorPage -> RequestData -> Status -> Maybe T.Text -> T.Text ->
@@ -78,7 +82,7 @@ errorResp _ _ status _ msg = plainErrorResp status msg
 
 htmlErrorResp :: ErrorPage -> RequestData -> Status -> T.Text -> Response
 htmlErrorResp errorPage rd status msg =
-  errorResp errorPage rd status (Just "GET") msg
+  buildHtmlResp status $ errorPage rd status (Just "GET") msg
 
 htmlErrorResp' :: ErrorPage -> RequestData -> Status -> Response
 htmlErrorResp' err rd status =

@@ -24,6 +24,9 @@ import qualified Data.Vault.Lazy as Vault
 import qualified Data.ByteString as BS
 import Crypto.KDF.BCrypt
 import Network.Wai
+import Network.HTTP.Types (parseSimpleQuery)
+
+import Sebweb.Utils
 
 
 data UserAccess =
@@ -33,8 +36,10 @@ data UserAccess =
   AuthUnknown
   deriving (Show)
 
+-- rdSQ allows from simple query, not normal querys without value
 data RequestData = RequestData {
   rdPath :: T.Text
+, rdSQ :: [(T.Text, T.Text)]
 , rdRev :: T.Text
 , rdAuth :: UserAccess }
 
@@ -58,11 +63,15 @@ revKey = unsafePerformIO Vault.newKey
 -- Request Data
 
 getRequestData :: Request -> RequestData
-getRequestData req =
-  RequestData (getRequestPath req) (getRequestRev req) (getRequestAuth req)
+getRequestData req = RequestData (getRequestPath req) (getRequestSQ req)
+  (getRequestRev req) (getRequestAuth req)
 
 getRequestPath :: Request -> T.Text
 getRequestPath req = T.intercalate "/" (pathInfo req)
+
+getRequestSQ :: Request -> [(T.Text, T.Text)]
+getRequestSQ req = map (\(k,v) -> (decodeUtf8Ignore k, decodeUtf8Ignore v))
+  (parseSimpleQuery $ rawQueryString req)
 
 getRequestRev :: Request -> T.Text
 getRequestRev req = fromMaybe "noRev" $ Vault.lookup revKey (vault req)

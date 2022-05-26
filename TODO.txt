@@ -1,2 +1,11 @@
+- static file serving
+- integrate toggle query
+- use hashing for static file tags
+
+- clean up log: logh vs hlog
+- clean up toggleQuery: nameing and functio placement
+
+- Date for RequestDate to avoid getCurrentTime
+
 - TODO: FILE IO
 - WhoisLooker refactor

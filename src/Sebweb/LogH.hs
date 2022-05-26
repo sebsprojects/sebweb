@@ -48,6 +48,7 @@ mkHLogData :: Maybe T.Text -> T.Text -> T.Text -> T.Text -> T.Text ->
               Maybe T.Text -> HLogData
 mkHLogData = HLogData epochDate
 
+
 -- ------------------------------------------------------------------------
 -- HTTP Log Line Construction
 
@@ -92,14 +93,14 @@ tryUATokens (t : ts) uaText | T.isInfixOf t uaText = Just t
 
 data HLogQuery = HLogQuery {
   hlqDate :: UTCTime
-, hlqMethods :: [T.Text]
 , hlqStatus :: [T.Text]
+, hlqMethods :: [T.Text]
 , hlqStatic :: (Bool, Bool)
 } deriving (Show, Eq)
 
 hLogPerformQuery :: T.Text -> HLogQuery -> IO [HLogData]
 hLogPerformQuery logDir hlq = do
-  mh <- readLogH logDir (hlqDate hlq) "_httplog.txt"
+  mh <- readLogH logDir (hlqDate hlq) "_http.txt"
   case mh of
     Nothing -> pure []
     Just h -> gatherHttpReport hlq h []

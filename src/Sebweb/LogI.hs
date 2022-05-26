@@ -7,6 +7,9 @@ module Sebweb.LogI (
 
   , ILogQuery(..)
   , iLogPerformQuery
+
+  , textToIT
+  , textToIL
 ) where
 
 import System.IO hiding (hPutStr)
@@ -73,7 +76,7 @@ data ILogQuery = ILogQuery {
 
 iLogPerformQuery :: T.Text -> ILogQuery -> IO [ILogData]
 iLogPerformQuery logDir ilqr = do
-  mh <- readLogH logDir (ilqrDate ilqr) "_internallog.txt"
+  mh <- readLogH logDir (ilqrDate ilqr) "_intr.txt"
   case mh of
     Nothing -> pure []
     Just h -> gatherInternalReport ilqr h []
