@@ -1,6 +1,8 @@
 - static file serving
 - integrate toggle query
 - use hashing for static file tags
+- go over response headers
+- reponse headers for http-only ACME (esp. csp and sts)
 
 - clean up log: logh vs hlog
 - clean up toggleQuery: nameing and functio placement

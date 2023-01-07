@@ -8,7 +8,7 @@ import System.IO
 import System.Timeout
 import System.Directory
 import Data.Maybe
-import Data.List
+import Data.List (union)
 import Data.Time
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -45,9 +45,9 @@ workerWhoisLooker ilq startt logDir hSuff =
           "whoislooker: could not find yesterdays log with path " <>
           T.pack logFP
       True -> do
-        ips <- bracket (openFile logFP ReadMode) hClose (flip gatherIps $ [])
-        ipLocs <- mapM (\ip -> issueWhoisQuery ilq ip) ips
-        let ipCountryPairs = concat $ map makeIpCountryPair ipLocs
+        ips <- withFile logFP ReadMode (flip gatherIps [])
+        ipLocs <- mapM (issueWhoisQuery ilq) ips
+        let ipCountryPairs = concatMap makeIpCountryPair ipLocs
         -- TEMP: Write out the full whois query result to a separate file
         -- let tempPath = T.unpack logDir <> "/" <> tf yesterday <> "_whoislog.txt"
         --_ <- bracket (openFile tempPath WriteMode) hClose $ \h -> do
@@ -56,7 +56,7 @@ workerWhoisLooker ilq startt logDir hSuff =
         --  mapM_ (TIO.hPutStrLn h) wlns
         updateLogFile logFP ipCountryPairs
         logEnqueue ilq $ mkILogData ILInfo ITWorker $
-          "whoislooker: finished with " <> (T.pack $ show $ length ips) <>
+          "whoislooker: finished with " <> T.pack (show $ length ips) <>
           " whois lookups"
   where tf = formatTime defaultTimeLocale "%F"
         makeIpCountryPair (ip, locs) = case lookup "country" locs of
@@ -92,10 +92,10 @@ gatherIps h acc = do
   eof <- hIsEOF h
   if eof
     then return acc
-    else TIO.hGetLine h >>= \l -> gatherIps h (union acc (extractIp l))
+    else TIO.hGetLine h >>= \l -> gatherIps h (acc `union` extractIp l)
 
 extractIp :: T.Text -> [T.Text]
-extractIp l = fromMaybe [] $ fmap (: []) (safeIndex (T.splitOn "," l) 1)
+extractIp l = maybeToList (safeIndex (T.splitOn "," l) 1)
 
 writeBackLogLines :: Handle -> Handle -> IPInfo -> IO ()
 writeBackLogLines hOld hNew ipLocs = do
@@ -154,7 +154,7 @@ getServerName :: T.Text -> T.Text
 getServerName hn =
   mStripPrefixText "whois." $
   mStripPrefixText "rwhois." $
-  mStripSuffixText ".net" $
+  mStripSuffixText ".net"
   hn
 
 mStripPrefixText :: T.Text -> T.Text -> T.Text
@@ -180,7 +180,7 @@ whoisQueryRec ilq ip = do
       else return $ appInf arinServer 0 arinInfo
   where appInf s c xs = xs ++ [("server", getServerName s)] ++
                         [("refcount", T.pack $ show (c :: Int))]
-        stripRef = (mStripPrefixText "whois://")
+        stripRef = mStripPrefixText "whois://"
 
 whoisQuery :: ILogQueue -> T.Text -> T.Text -> IO IPInfo
 whoisQuery ilq server ip = do
@@ -194,10 +194,10 @@ whoisQuery ilq server ip = do
 parseWhoisResponse :: T.Text -> IPInfo
 parseWhoisResponse t =
   let lns = filterComments $ filterEmpty $ map stripCR (T.lines t)
-      vs = catMaybes $ map (tryKeys keys) lns
-  in concat $ map (\k -> lookupToPair k vs) keys
+      vs = mapMaybe (tryKeys keys) lns
+  in concatMap (\k -> lookupToPair k vs) keys
   where stripCR = T.takeWhile (/= '\r')
-        filterComments bss = filter (\bs -> not $ T.isPrefixOf "#" bs) bss
+        filterComments bss = filter (not . T.isPrefixOf "#") bss
         filterEmpty bss = filter (/= "") bss
         keys = ["referralserver", "country", "city"]
         lookupToPair k di = case lookup k di of
@@ -208,7 +208,7 @@ tryKeys :: [T.Text] -> T.Text -> Maybe (T.Text, T.Text)
 tryKeys keys t =
   let toks = T.splitOn ":" t
   in case toks of
-    (k : v : vs) -> if (T.toLower $ T.strip k) `elem` keys
+    (k : v : vs) -> if T.toLower (T.strip k) `elem` keys
                     then Just (T.toLower $ T.strip k,
                                T.strip $ T.intercalate ":" (v : vs))
                     else Nothing
@@ -232,9 +232,9 @@ makeWhoisQuery ilq server ipString = withSocketsDo $ do
       return Nothing
   where sendAndReceive a = bracket (open a) close query
         query = makeQuery $ TE.encodeUtf8 $
-                (getQuery (T.pack server)) (T.pack ipString)
+                getQuery (T.pack server) (T.pack ipString)
         handleUEx e = do
-          logWhois $ "whoislooker: " <> (T.pack $ show e)
+          logWhois $ "whoislooker: " <> T.pack (show e)
           return ""
         logWhois msg = do
           now <- getCurrentTime
@@ -260,8 +260,7 @@ open addr = do
 makeQuery :: BS.ByteString -> Socket -> IO BS.ByteString
 makeQuery q sock = do
   sendAll sock q
-  resp <- recvAll sock
-  return resp
+  recvAll sock
 
 recvAll :: Socket -> IO BS.ByteString
 recvAll s = whileM (/= BS.empty) [] (recv s 1024) " " >>= return . BS.concat

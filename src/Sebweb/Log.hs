@@ -63,7 +63,7 @@ workerLogWriter logDir fileSuffix logInterval lq = do
 logFlush :: (LogData a) => LogQueue a -> Handle -> IO ()
 logFlush lq h = do
   ls <- atomically $ flushTBQueue lq
-  mapM_ ((TIO.hPutStr h) . assembleLogLine) ls >> hFlush h
+  mapM_ (TIO.hPutStr h . assembleLogLine) ls >> hFlush h
 
 
 -- ------------------------------------------------------------------------
@@ -88,8 +88,7 @@ readLogH logDir tim suff = do
 logListFileDates :: T.Text -> T.Text -> IO [UTCTime]
 logListFileDates logDir infx = do
   -- TODO: Safer!
-  es <- listDirectory (T.unpack logDir) >>= pure . (map T.pack)
+  es <- listDirectory (T.unpack logDir) >>= pure . map T.pack
   let logs = filter (T.isInfixOf infx) es
-  let dateStrings = map (T.unpack . (safeHead "") . (T.splitOn "_")) logs
-  return $ catMaybes $ map (parseTimeM True defaultTimeLocale "%F") dateStrings
-
+  let dateStrings = map (T.unpack . safeHead "" . T.splitOn "_") logs
+  return $ mapMaybe (parseTimeM True defaultTimeLocale "%F") dateStrings

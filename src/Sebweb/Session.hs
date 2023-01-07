@@ -13,13 +13,13 @@ module Sebweb.Session (
 ) where
 
 import Data.Time
-import Data.List
+import Data.List (find)
 import qualified Data.Text as T
 import Control.Concurrent.STM
 
 import Sebweb.Utils
 import Sebweb.Log
-import Sebweb.LogI
+import Sebweb.LogI (mkILogData, ILogLevel(ILInfo), ILogQueue, ILogType(ITWorker))
 import Sebweb.Worker
 
 
@@ -64,13 +64,13 @@ querySessionStore ss tok = do
   return $ find (matchesToken tok) sessions
 
 isExpiredSession :: UTCTime -> Session -> Bool
-isExpiredSession now s = (diffUTCTime (sExpires s) now) < 0
+isExpiredSession now s = diffUTCTime (sExpires s) now < 0
 
 matchesUserName :: T.Text -> Session -> Bool
-matchesUserName t s = t == (sUser s)
+matchesUserName t s = t == sUser s
 
 matchesToken :: T.Text -> Session -> Bool
-matchesToken t s = t == (sToken s)
+matchesToken t s = t == sToken s
 
 workerSessionClearer :: ILogQueue -> Int -> SessionStore -> IO ()
 workerSessionClearer ilq startt ss =
@@ -79,6 +79,6 @@ workerSessionClearer ilq startt ss =
     removeAllExpiredSessions ss
     sessLAfter <- readTVarIO ss >>= return . length
     logEnqueue ilq $ mkILogData ILInfo ITWorker $
-      "sessionclearer: from " <> (T.pack $ show sessLBefore) <>
-      " to " <> (T.pack $ show sessLAfter) <> " sessions"
+      "sessionclearer: from " <> T.pack (show sessLBefore) <>
+      " to " <> T.pack (show sessLAfter) <> " sessions"
 

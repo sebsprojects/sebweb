@@ -5,14 +5,11 @@ module Sebweb.ViewLogh (
 import Prelude hiding (head, id, div)
 import Data.Time
 import Data.Maybe
-import Data.Ord (comparing)
-import Data.List (sortBy)
+import Data.List (sortOn)
 import qualified Data.Text as T
 import Text.Blaze.Html5 hiding (style, map, code)
 import Text.Blaze.Html5.Attributes hiding (form, title, max, summary)
 
-import Sebweb.Utils
-import Sebweb.Common
 import Sebweb.ToggleQuery
 import Sebweb.LogH
 
@@ -26,7 +23,7 @@ mkLogSection hld num isOpen h = detailTag $ do
     div ! class_ (cl "ua") $ toHtml (fromMaybe "unknownUA" $ hldUserAgent hld)
   mkLogLine hld
   h
-  where detailTag h = if isOpen then details ! open "" $ h else details  $ h
+  where detailTag h = if isOpen then details ! open "" $ h else details h
         cl typ = textValue "log-report-field log-report-item-" <> typ
 
 mkLogLine :: HLogData -> Html
@@ -45,20 +42,19 @@ processLine :: [HLogData] -> Bool -> Maybe T.Text -> [Html -> Html] ->
 processLine [] _ _ acc = acc
 processLine (hld : logData) isOpen _ [] =
   let cip = hldIP hld
-      num = 1 + (length $ filter (\x -> cip == hldIP x) logData)
+      num = 1 + length (filter (\x -> cip == hldIP x) logData)
   in processLine logData isOpen cip [mkLogSection hld num isOpen]
-processLine (hld : logData) isOpen lip (a : acc) = case lip == (hldIP hld) of
+processLine (hld : logData) isOpen lip (a : acc) = case lip == hldIP hld of
   True ->
     let appD hld' f h = f (mkLogLine hld' >> h)
-    in processLine logData isOpen (hldIP hld) ((appD hld a) : acc)
+    in processLine logData isOpen (hldIP hld) (appD hld a : acc)
   False ->
     let cip = hldIP hld
-        num = 1 + (length $ filter (\x -> cip == hldIP x) logData)
-    in processLine logData isOpen cip ((mkLogSection hld num isOpen) : a : acc)
+        num = 1 + length (filter (\x -> cip == hldIP x) logData)
+    in processLine logData isOpen cip (mkLogSection hld num isOpen : a : acc)
 
-siteLogh :: RequestData -> (Html -> Html) -> [HLogData] -> ToggleQueryState ->
-            Html
-siteLogh rd htmlWrapper logData tqs = htmlWrapper $ div ! class_ "sel-cont" $ do
+siteLogh :: (Html -> Html) -> [HLogData] -> ToggleQueryState -> Html
+siteLogh htmlWrapper logData tqs = htmlWrapper $ div ! class_ "sel-cont" $ do
   div ! class_ "sel-section" $ do
     tglLink tqs (tglExclM1 0) 0 0 "/logh" "-1d"
     tglLink tqs (tglExclM1 1) 0 1 "/logh" "-2d"
@@ -83,10 +79,12 @@ siteLogh rd htmlWrapper logData tqs = htmlWrapper $ div ! class_ "sel-cont" $ do
       a ! href (textValue $ "/logh" <> tqsToQueryString tqs400) $ "e"
     div ! class_ "sel-item" $
       a ! href (textValue $ "/logh" <> tqsToQueryString tqs500) $ "E"
-  div ! class_ "sel-details" $ div ! class_ "sel-item" $
+  div ! class_ "sel-details" $
+    div ! class_ "sel-item" $
       a ! href (textValue $ "/logh" <> tqsToQueryString tqsDetails) $ "details"
   div ! class_ "log-report-cont" $ do
-    toHtml $ map (\h -> h "") (processLine (sortByIPthenTime logData) (queryTqs 4 1 tqs) Nothing [])
+    toHtml $ map (\h -> h "") (processLine (sortByIPthenTime logData)
+                               (queryTqs 4 1 tqs) Nothing [])
   where tqsAll = toggleTqs' 2 (tglExclM1 2) $
                  toggleTqs' 3 (tglExclM1 2) loghDefaultTqs
         tqs400 = toggleTqs' 1 (tglExclM1 2) tqsAll
@@ -94,4 +92,4 @@ siteLogh rd htmlWrapper logData tqs = htmlWrapper $ div ! class_ "sel-cont" $ do
         tqsDetails = toggleTqs' 4 tglSwap tqs
 
 sortByIPthenTime :: [HLogData] -> [HLogData]
-sortByIPthenTime = sortBy (comparing (\hld -> (hldIP hld, hldTime hld)))
+sortByIPthenTime = sortOn (\hld -> (hldIP hld, hldTime hld))

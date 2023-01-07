@@ -61,7 +61,7 @@ buildRedirectResp target =
   responseBuilder status303 [(hLocation, TE.encodeUtf8 target)] empty
 
 buildFullRedirectResp :: T.Text -> Request -> Response
-buildFullRedirectResp host req = 
+buildFullRedirectResp host req =
   responseBuilder status301 [(hLocation, p)] mempty
   where p = "https://" <> TE.encodeUtf8 host <> rawPathInfo req <>
             rawQueryString req
@@ -105,8 +105,8 @@ jsonErrorResp' status =
 plainErrorResp :: Status -> T.Text -> Response
 plainErrorResp status msg = buildPlainResp status $
   "HTTP Error\n" <>
-  "Error Code: " <> (B8.pack $ show (statusCode status)) <> "\n" <>
-  "Error Message: " <> (statusMessage status) <> "\n" <>
+  "Error Code: " <> B8.pack (show (statusCode status)) <> "\n" <>
+  "Error Message: " <> statusMessage status <> "\n" <>
   case T.null msg of
     True -> ""
     False -> "Error Info: " <> TE.encodeUtf8 msg <> "\n"

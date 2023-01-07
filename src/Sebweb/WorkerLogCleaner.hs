@@ -4,10 +4,9 @@ module Sebweb.WorkerLogCleaner (
 
 import System.IO
 import System.Directory
-import Control.Exception
 import Data.Time
 import Data.Maybe
-import Data.List
+import Data.List (sort)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 
@@ -36,10 +35,9 @@ logCleaner ilq logDir storDir trashDir suff = do
   let dBuf = 10
   let monthsBack = 12
   let ms = monthList now monthsBack (fromIntegral dBuf)
-  return ()
-  mapM_ (\(y,m) -> (cleanYM ilq (mkFil y m now dBuf) logDir trashDir (mkPth y m))) ms
-  where mkPth y m = storDir <> "/" <> (T.pack $ show y) <> "-" <> padNum m <> suff
-        mkFil y m now dBuf t = dateFilter y m t && typeFilter suff t &&
+  mapM_ (\(y,m) -> cleanYM ilq (mkFil y m now dBuf) logDir trashDir (mkPth y m)) ms
+  where mkPth y m = storDir <> "/" <> T.pack (show y) <> "-" <> padNum m <> suff
+        mkFil y m now dBuf t = dateFilter y m t && T.isSuffixOf suff t &&
                                currentMonthDayFilter now dBuf t
 
 
@@ -48,7 +46,7 @@ cleanYM :: ILogQueue -> (T.Text -> Bool) -> T.Text -> T.Text -> T.Text -> IO ()
 cleanYM ilq fil logDir trashDir storFile = do
   -- TODO: FILE IO
   logs <- listDirectory (T.unpack logDir) >>=
-          return . sort . (filter fil) . (map T.pack)
+          return . sort . filter fil . map T.pack
   case null logs of
     True -> return ()
     False -> do
@@ -56,9 +54,7 @@ cleanYM ilq fil logDir trashDir storFile = do
         "logcleaner: filter matching " <> T.pack (show $ length logs) <>
         " log files, starting cleaning"
       -- TODO: FILE IO
-      bracket
-        (openFile (T.unpack storFile) WriteMode)
-        (hClose)
+      withFile (T.unpack storFile) WriteMode
         (\h -> mapM_ (appendLogFile logDir h) logs)
       mapM_ (\f -> renameFile (mkFilNam logDir f) (mkFilNam trashDir f)) logs
       logEnqueue ilq $ mkILogData ILInfo ITWorker
@@ -75,10 +71,7 @@ appendLogFile logDir h p = do
     Nothing -> return ()
     Just _ -> do
       -- TODO: FILE IO
-      bracket
-        (openFile (T.unpack $ logDir <> "/" <> p) ReadMode)
-        hClose
-        (\hLog -> processLines h hLog)
+      withFile (T.unpack $ logDir <> "/" <> p) ReadMode (processLines h)
 
 processLines :: Handle -> Handle -> IO ()
 processLines hStor hLog = do
@@ -98,8 +91,7 @@ dateFilter :: Int -> Int -> T.Text -> Bool
 dateFilter year month t =
   let mtoks = fmap (T.splitOn "-") (listToMaybe (T.splitOn "_" t))
   in case mtoks of
-    Just (y : m : _ : []) -> y == (T.pack $ show year) &&
-                             m == (padNum month)
+    Just [y, m, _] -> y == T.pack (show year) && m == padNum month
     _ -> False
 
 -- Given the current date and dayBuffer, checks that if t contains the current
@@ -110,13 +102,10 @@ currentMonthDayFilter now dBuf t =
       (currentYear, currentMonth, currentDay) = toGregorian (utctDay now)
       daysT = map padNum [1..(max 0 (currentDay - dBuf))]
   in case mtoks of
-    Just (y : m : d : []) | padNum currentMonth == m &&
-                            (T.pack $ show currentYear) == y -> d `elem` daysT
-                          | otherwise -> True
+    Just [y, m, d] | padNum currentMonth == m &&
+                     T.pack (show currentYear) == y -> d `elem` daysT
+                   | otherwise -> True
     _ -> False
-
-typeFilter :: T.Text -> T.Text -> Bool
-typeFilter suff t = T.isSuffixOf suff t
 
 padNum :: Int -> T.Text
 padNum m | m < 9 = T.pack $ "0" <> show m

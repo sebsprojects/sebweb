@@ -21,7 +21,7 @@ import Control.Exception
 import Text.Read
 import Data.Maybe
 import Data.Time
-import Data.List
+import Data.List (dropWhileEnd)
 import Data.Text.Encoding (encodeUtf8)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -51,7 +51,7 @@ data ServerConfig = ServerConfig {
 , cSslKeyPath :: T.Text
 , cUsersDirPath :: T.Text
 , cLogDirPath :: T.Text
-, cStaticDirPath :: T.Text
+, cStaticDirPaths :: [T.Text]
 
 , cCookieName :: T.Text
 , cMaxSessionAge :: Int
@@ -64,17 +64,28 @@ data ServerConfig = ServerConfig {
 , cWrktSessionClearer :: Int
 , cWrktWhoisLooker :: Int
 , cWrktLogCleaner :: Int
-}
+} deriving (Show)
 
 
 -- ------------------------------------------------------------------------
 -- Config Parsing (subset of JSON supporting only int and string)
 
 cfgT :: T.Text -> [(T.Text, T.Text)] -> Maybe T.Text
-cfgT key config = lookup key config
+cfgT key config = fmap (T.strip . T.filter (/= '\"')) (lookup key config)
 
 cfgI :: T.Text -> [(T.Text, T.Text)] -> Maybe Int
 cfgI key config = compMF2 readMaybe (fmap T.unpack) (lookup key config)
+
+cfgL :: T.Text -> [(T.Text, T.Text)] -> Maybe [T.Text]
+cfgL key = compMF2 parseList (lookup key)
+
+parseList :: T.Text -> Maybe [T.Text]
+parseList t = case T.uncons (T.strip t) of
+  Just ('[', t1) -> case T.unsnoc t1 of
+    Just (t2, ']') ->
+      Just $ map (T.strip . T.filter (/= '\"')) (T.split (== ',') t2)
+    _ -> Nothing
+  _ -> Nothing
 
 -- TODO: FILE IO
 configFromFile :: FilePath -> IO (Maybe ServerConfig)
@@ -91,8 +102,9 @@ configFromText t =
   let dict = configPairsFromText t
       valT key f = fmap f (cfgT key dict) -- f :: T.Text -> a
       valI key f = fmap f (cfgI key dict) -- f :: Int -> a
-      fm f x = fromMaybe Nothing $ fmap f x
-      updM valType key updf = fm (\sc -> valType key (updf sc))
+      valL key f = fmap f (cfgL key dict)
+      fm = maybe Nothing
+      updM valType key updf = fm (valType key . updf)
   in updM valT "revision"           (\c v -> c { cRevision = v }) $
      updM valT "hostName"           (\c v -> c { cHostName = v }) $
      updM valT "serverName"         (\c v -> c { cServerName = v }) $
@@ -101,8 +113,8 @@ configFromText t =
      updM valT "sslCertPath"        (\c v -> c { cSslCertPath = v }) $
      updM valT "sslKeyPath"         (\c v -> c { cSslKeyPath = v }) $
      updM valT "usersDirPath"       (\c v -> c { cUsersDirPath = v }) $
-     updM valT "logDirPath"         (\c v -> c { cLogDirPath= v }) $
-     updM valT "staticDirPath"      (\c v -> c { cStaticDirPath = v }) $
+     updM valT "logDirPath"         (\c v -> c { cLogDirPath = v }) $
+     updM valL "staticDirPaths"     (\c v -> c { cStaticDirPaths = v }) $
      updM valT "cookieName"         (\c v -> c { cCookieName = v }) $
      updM valI "maxSessionAge"      (\c v -> c { cMaxSessionAge = v }) $
      updM valI "maxContentLength"   (\c v -> c { cMaxContentLength= v }) $
@@ -116,18 +128,15 @@ configFromText t =
 
 configPairsFromText :: T.Text -> [(T.Text, T.Text)]
 configPairsFromText t =
-  let ls = map (T.filter configFilter) $
-           dropWhile (/= "{") $
+  let ls = dropWhile (/= "{") $
            dropWhileEnd (/= "}" ) $
            map T.strip (T.lines t)
-  in catMaybes $ map parseLine ls
-
-configFilter :: Char -> Bool
-configFilter c = (c /= '\"') && (c /= ',')
+  in mapMaybe parseLine ls
 
 parseLine :: T.Text -> Maybe (T.Text, T.Text)
 parseLine l = case T.splitOn ":" l of
-  [k, v] -> Just (T.strip k, T.strip v)
+  [k, v] -> Just (T.filter (/= '\"') (T.strip k),
+                  T.dropWhileEnd (== ',') (T.strip v))
   _ -> Nothing
 
 
@@ -138,14 +147,14 @@ runStandardRedirecter :: ServerConfig -> ILogQueue -> IO ()
 runStandardRedirecter cfg ilq =
   runSettings (warpRedirectSettings cfg ilq) $
     withCommonHeaders $
-    withCertbotACMEHandler ilq (cStaticDirPath cfg) $
+    withCertbotACMEHandler ilq (cStaticDirPaths cfg) $
       -- Removed all middleware checks, this should be handled by
       -- the main app once redirected
 --    withResponseTimeoutCheck (cfgI "responseTimeout" cfg) errorPage $
 --    withHeaderHostCheck (cfgT "hostName" cfg) errorPage $
 --    withMethodCheck errorPage $
 --    withContentLengthCheck (cfgI "maxContentLength" cfg) errorPage $
-    \req resp -> (resp $ buildFullRedirectResp (cHostName cfg) req)
+    \req resp -> resp $ buildFullRedirectResp (cHostName cfg) req
 
 runStandardApp :: ServerConfig -> ILogQueue -> HLogQueue ->
                   SessionStore -> ErrorPage -> Application -> IO ()
@@ -162,8 +171,7 @@ runStandardApp cfg ilq hlq sessionStore errorPage app = do
     withContentLengthCheck (cMaxContentLength cfg) errorPage $
     withAuth ilq sessionStore (cCookieName cfg) $
     (if hostName == "localhost" then withDev errorPage else id) $
-    withStaticFileHandler (cStaticDirPath cfg) $
-    app
+    withStaticFileHandler (cStaticDirPaths cfg) app
 
 logStartup :: Bool -> IO ()
 logStartup success = do
@@ -183,24 +191,20 @@ warpRedirectSettings c ilq =
   setPort (cHttpPort c) $
   setServerName (encodeUtf8 $ cServerName c <> "-r") $
   setOnException (handleRedirectException ilq) $
-  setOnExceptionResponse serveExceptionResponse $
-  defaultSettings
+  setOnExceptionResponse serveExceptionResponse defaultSettings
 
 warpMainSettings :: ServerConfig -> ILogQueue -> Settings
 warpMainSettings c ilq =
   setPort (cHttpsPort c) $
   setServerName (encodeUtf8 $ cServerName c) $
   setOnException (handleWarpException ilq) $
-  setOnExceptionResponse serveExceptionResponse $
-  defaultSettings
+  setOnExceptionResponse serveExceptionResponse defaultSettings
 
 warpTLSSettings :: ServerConfig -> TLSSettings
-warpTLSSettings c = defaultTlsSettings {
-  certFile = T.unpack $ cSslCertPath c
-, keyFile = T.unpack $ cSslKeyPath c
-, onInsecure = DenyInsecure et }
-  where et = "sebsmpu accepts only secure connections via HTTPS at this " <>
-             "port. Please upgrade!"
+warpTLSSettings c = s { onInsecure = DenyInsecure m }
+  where s = tlsSettings (T.unpack $ cSslCertPath c) (T.unpack $ cSslKeyPath c)
+        m = "sebsmpu accepts only secure connections via HTTPS at this " <>
+            "port. Please upgrade!"
 
 
 -- ------------------------------------------------------------------------
@@ -208,11 +212,11 @@ warpTLSSettings c = defaultTlsSettings {
 
 handleWarpException :: ILogQueue -> Maybe Request -> SomeException -> IO ()
 handleWarpException ilq _ e =
-  logEnqueue ilq $ mkILogData ILError ITWarp ("warp: " <> (T.pack $ show e))
+  logEnqueue ilq $ mkILogData ILError ITWarp ("warp: " <> T.pack (show e))
 
 handleRedirectException :: ILogQueue -> Maybe Request -> SomeException -> IO ()
 handleRedirectException ilq _ e =
-  logEnqueue ilq $ mkILogData ILError ITWarp ("warpre: " <> (T.pack $ show e))
+  logEnqueue ilq $ mkILogData ILError ITWarp ("warpre: " <> T.pack (show e))
 
 -- Basically same as Warp's defaultOnExceptionResponse
 -- TODO: Handle HTTP2 ConnectionError like in ^

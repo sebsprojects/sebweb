@@ -90,7 +90,7 @@ withAuth ilq ss cn app req respond = do
         insertAuthAndResetCookie now auth = do
           let v = Vault.insert authKey auth (vault req)
           app (req { vault = v }) $
-            respond . (setCookieIfUnset (emptyCookieBS cn now))
+            respond . setCookieIfUnset (emptyCookieBS cn now)
         logAuth level msg = logEnqueue ilq $ mkILogData level ITAuth msg
 
 withRequestLogging :: HLogQueue -> Middleware
@@ -106,7 +106,7 @@ withRequestLogging hlq app req respond = app req $ \r -> do
     (fmap decodeUtf8Ignore (requestHeaderReferer req))
     (fmap decodeUtf8Ignore (requestHeaderUserAgent req))
     (isJust $ lookup hCookie (requestHeaders req))
-    (fromMaybe False $ fmap parseDNT (lookup "DNT" $ requestHeaders req))
+    (maybe False parseDNT (lookup "DNT" $ requestHeaders req))
     Nothing
   respond r
   where parseDNT "1" = True
@@ -123,7 +123,7 @@ withRequestLogging hlq app req respond = app req $ \r -> do
 --   Serves a 400 error response for any other host
 withHeaderHostCheck :: T.Text -> ErrorPage -> Middleware
 withHeaderHostCheck hostName err app req respond = do
-  case (fmap stripPort (requestHeaderHost req)) of
+  case fmap stripPort (requestHeaderHost req) of
     Just hn | hn == hostName -> app req respond
             -- | hn == "www." <> hostName ->
             --   if allowWWW
@@ -136,7 +136,7 @@ withHeaderHostCheck hostName err app req respond = do
 -- Serves a 405 error for anything not GET, POST or HEAD
 withMethodCheck :: ErrorPage -> Middleware
 withMethodCheck err app req respond =
-  if (requestMethod req) `elem` allowedMethods
+  if requestMethod req `elem` allowedMethods
     then app req respond
     else respond $ buildErrorResp' err status405 req
   where allowedMethods = ["GET", "POST", "HEAD"]
@@ -157,7 +157,7 @@ withResponseTimeoutCheck seconds err app req respond = do
   mResponseReceived <- timeout (seconds * 1000000) (app req respond)
   case mResponseReceived of
     Nothing -> respond $ buildErrorResp' err status503 req
-    Just rr -> return $ rr
+    Just rr -> return rr
 
 
 -- ------------------------------------------------------------------------
@@ -177,7 +177,7 @@ withCommonHeaders app req respond = app req (respond . addHs)
 
 -- If we go a HEAD request, strip the response body
 withHeadRequestStripping :: Middleware
-withHeadRequestStripping app req respond = case (requestMethod req) of
+withHeadRequestStripping app req respond = case requestMethod req of
   "HEAD" -> app req $ respond . stripResponseBody
   _ -> app req respond
   where stripResponseBody r = responseBuilder (responseStatus r)
@@ -211,11 +211,11 @@ withDev err app req respond = do
 -- ------------------------------------------------------------------------
 -- Standalone Handlers
 
-withCertbotACMEHandler :: ILogQueue -> T.Text -> Middleware
-withCertbotACMEHandler ilq staticDir app req respond = do
-  case (isValidPath $ pathInfo req, pathInfo req) of
+withCertbotACMEHandler :: ILogQueue -> [T.Text] -> Middleware
+withCertbotACMEHandler ilq staticDirs app req respond = do
+  case (isValidPath staticDirs (pathInfo req), pathInfo req) of
     (True, ".well-known" : "acme-challenge" : _) -> do
-      let fpth = T.intercalate "/" (staticDir : (pathInfo req))
+      let fpth = T.intercalate "/" (pathInfo req)
       -- TODO: FILE IO
       fe <- doesFileExist (T.unpack fpth)
       case fe of
@@ -231,13 +231,14 @@ withCertbotACMEHandler ilq staticDir app req respond = do
   where logACME l m = logEnqueue ilq $ mkILogData l ITOther m
 
 -- TODO: use rawPath instead, especially for valid path?
--- TODO: Pass static dir prefix as argument from config
-withStaticFileHandler :: T.Text -> Middleware
-withStaticFileHandler staticDirPath app req respond = do
+-- Use staticDirPaths as a check only and base the file request on the
+-- "server root" dir instead
+withStaticFileHandler :: [T.Text] -> Middleware
+withStaticFileHandler staticDirs app req respond = do
   let suff = fromMaybe "" $ extractPathSuffix' (pathInfo req)
-  if isStaticSuffix suff && isValidPath (pathInfo req)
+  if isStaticSuffix suff && isValidPath staticDirs (pathInfo req)
     then do
-      let fpth = T.intercalate "/" (staticDirPath : pathInfo req)
+      let fpth = T.intercalate "/" (pathInfo req)
       -- TODO: FILE IO
       fe <- doesFileExist (T.unpack fpth)
       case (fe, isWebSuffix suff) of
@@ -277,7 +278,7 @@ parseETag :: BS.ByteString -> [BS.ByteString]
 parseETag bs =
   let bs1 = applyIgnoreNothing (B8.stripPrefix "W/") bs
       bs2 = compMF2 (B8.stripPrefix "\"") (B8.stripSuffix "\"") bs1
-  in fromMaybe [] (fmap (\x -> [x]) bs2)
+  in maybeToList bs2
 
 
 fileResponse :: T.Text -> [Header] -> Response
@@ -301,9 +302,9 @@ getHostName req = do
   (mHostName, _) <- getNameInfo [NI_NUMERICHOST] True False (remoteHost req)
   return $ fmap T.pack mHostName
 
-isValidPath :: [T.Text] -> Bool
-isValidPath pth = (not $ T.isPrefixOf "/" (safeHead "" pth)) &&
-    (not $ or $ map (T.isInfixOf "..") pth)
+isValidPath :: [T.Text] -> [T.Text] -> Bool
+isValidPath pth staticDirs = not (T.isPrefixOf "/" (safeHead "" pth)) &&
+    not (any (T.isInfixOf "..") pth)
 
 ctHeader :: T.Text -> [Header]
 ctHeader "css" = [(hContentType, "text/css")]

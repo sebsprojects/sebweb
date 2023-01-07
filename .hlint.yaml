@@ -1,0 +1,10 @@
+- ignore: {name: "Use if"}
+- ignore: {name: "Use bimap"}
+- ignore: {name: "Use second"}
+- ignore: {name: "Use <$>"}
+- ignore: {name: "Use <&>"}
+- ignore: {name: "Use :"}
+- ignore: {name: "Use &&"}
+- ignore: {name: "Use section"}
+- ignore: {name: "Avoid lambda using `infix`"}
+- ignore: {name: "Eta reduce"}

@@ -10,6 +10,9 @@ module Sebweb.LogI (
 
   , textToIT
   , textToIL
+
+  , logiDefaultTqs
+  , ilqFromTqs
 ) where
 
 import System.IO hiding (hPutStr)
@@ -20,6 +23,7 @@ import qualified Data.Text.IO as TIO
 
 import Sebweb.Utils
 import Sebweb.Log
+import Sebweb.ToggleQuery
 
 
 -- ------------------------------------------------------------------------
@@ -98,7 +102,7 @@ gatherInternalReport ilqr h acc = do
 
 assembleInternalReport :: [T.Text] -> ILogData
 assembleInternalReport csv =
-  let mtim = parseTimeM False defaultTimeLocale "%F %T" (T.unpack $ csv !! 0)
+  let mtim = parseTimeM False defaultTimeLocale "%F %T" (T.unpack $ head csv)
   in ILogData { ildTime = fromMaybe errorTime mtim
               , ildLevel = textToILLeniant (csv !! 1)
               , ildType = textToITLeniant (csv !! 2)
@@ -106,14 +110,14 @@ assembleInternalReport csv =
 
 matchesInternalQuery :: ILogQuery -> [T.Text] -> Bool
 matchesInternalQuery ilqr csv =
-  (textToILLeniant (csv !! 1) `elem` (ilqrLevel ilqr)) &&
-  (textToITLeniant (csv !! 2) `elem` (ilqrType ilqr))
+  (textToILLeniant (csv !! 1) `elem` ilqrLevel ilqr) &&
+  (textToITLeniant (csv !! 2) `elem` ilqrType ilqr)
 
 textToITLeniant :: T.Text -> ILogType
-textToITLeniant = (fromMaybe ITOther) . textToIT
+textToITLeniant = fromMaybe ITOther . textToIT
 
 textToILLeniant :: T.Text -> ILogLevel
-textToILLeniant = (fromMaybe ILInfo) . textToIL
+textToILLeniant = fromMaybe ILInfo . textToIL
 
 textToIT :: T.Text -> Maybe ILogType
 textToIT "Wrk" = Just ITWorker
@@ -127,4 +131,24 @@ textToIL "Crt" = Just ILCrit
 textToIL "Err" = Just ILError
 textToIL "Inf" = Just ILInfo
 textToIL _ = Nothing
+
+
+-- ------------------------------------------------------------------------
+-- Toggle Query
+
+logiDefaultTqs :: ToggleQueryState
+logiDefaultTqs = [
+  ("day", [("1", True), ("2", False), ("3", False)])
+  , ("level", [("Crt", True), ("Err", True), ("Inf", False)])
+  , ("type", [("Ath", True), ("Wrk", True), ("Oth", True), ("Wrp", False)])
+  ]
+
+ilqFromTqs :: ToggleQueryState -> IO ILogQuery
+ilqFromTqs tqs = do
+  now <- getCurrentTime
+  let dMult = readIntDef 1 (extractFirstTqi 0 tqs)
+  let d = addUTCTime (fromIntegral (dMult * (-86400) :: Int)) now
+  let ls = mapMaybe textToIL (extractAllTqis 1 tqs)
+  let ts = mapMaybe textToIT (extractAllTqis 2 tqs)
+  return $ ILogQuery d ls ts
 

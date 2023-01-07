@@ -101,4 +101,3 @@ validateUser name pass path = do
   case validatePassword pass hash of
     True -> return $ AuthAuthorized name
     False -> return AuthUnauthorized
-

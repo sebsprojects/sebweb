@@ -33,6 +33,7 @@ module Sebweb.Utils (
 , deleteAtIndex
 , compMF2
 , applyIgnoreNothing
+, readIntDef
 
 , parseCSV
 , parseCSVLine
@@ -53,6 +54,7 @@ import Control.Exception
 import Control.Concurrent
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Read as TR (decimal)
 import Data.Text.Encoding.Error (ignore)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as B8
@@ -93,7 +95,7 @@ parseStrictKeyValuePairs tokDel valDel t =
       parseTok [x, y] | (not . T.null) x && (not . T.null) y = Just (x, y)
                       | otherwise = Nothing
       parseTok _ = Nothing
-  in catMaybes $ map parseTok $ map (map T.strip) rawToks
+  in mapMaybe (parseTok . map T.strip) rawToks
 
 parseCookieText :: T.Text -> [(T.Text, T.Text)]
 parseCookieText = parseStrictKeyValuePairs ";" "="
@@ -149,11 +151,11 @@ readRequestBody' prevBody byteLimit req = do
                   | otherwise = Just b
 
 addResponseHeaders :: [Header] -> Response -> Response
-addResponseHeaders xs = mapResponseHeaders (\hs -> hs ++ xs)
+addResponseHeaders xs = mapResponseHeaders (++ xs)
 
 setCookieIfUnset :: BS.ByteString -> Response -> Response
 setCookieIfUnset bs = mapResponseHeaders f
-  where f hs | hSetCookie `elem` (map fst hs) = hs
+  where f hs | hSetCookie `elem` map fst hs = hs
              | otherwise = hs ++ [(hSetCookie, bs)]
 
 assembleCookie :: T.Text -> T.Text -> UTCTime -> Int -> T.Text
@@ -194,21 +196,22 @@ countElem x xs = length (filter (== x) xs)
 
 modifyList :: Int -> (a -> a) -> [a] -> [a]
 modifyList _ _ [] = []
-modifyList 0 f (x : xs) = (f x) : xs
-modifyList ind f (x : xs) = x : (modifyList (ind - 1) f xs)
+modifyList 0 f (x : xs) = f x : xs
+modifyList ind f (x : xs) = x : modifyList (ind - 1) f xs
 
 deleteAtIndex :: Int -> [a] -> [a]
 deleteAtIndex _ [] = []
 deleteAtIndex 0 (_ : xs) = xs
-deleteAtIndex ind (x : xs) = x : (deleteAtIndex ind xs)
+deleteAtIndex ind (x : xs) = x : deleteAtIndex ind xs
 
 compMF2 :: (b -> Maybe c) -> (a -> Maybe b) -> (a -> Maybe c)
-compMF2 f g a = fromMaybe Nothing (fmap f $ g a)
+compMF2 f g a = f =<< g a
 
 applyIgnoreNothing :: (a -> Maybe a) -> a -> a
-applyIgnoreNothing f a = case f a of
-  Nothing -> a
-  Just x -> x
+applyIgnoreNothing f a = fromMaybe a (f a)
+
+readIntDef :: Int -> T.Text -> Int
+readIntDef d t = either (const d) fst (TR.decimal t)
 
 
 -- ---------------------------------------------------------------------------
@@ -234,10 +237,10 @@ consolidateToks (x : xs) True acc
 
 isOpening :: T.Text -> Bool
 isOpening "\"" = True
-isOpening y = (T.isPrefixOf "\"") y && (not $ isClosing y)
+isOpening y = T.isPrefixOf "\"" y && not (isClosing y)
 
 isClosing :: T.Text -> Bool
-isClosing y = (not $ T.isSuffixOf "\\\"" y) && (T.isSuffixOf "\"" y)
+isClosing y = not (T.isSuffixOf "\\\"" y) && T.isSuffixOf "\"" y
 
 dropQuotation :: T.Text -> T.Text
 dropQuotation = T.dropAround (== '\"')
@@ -259,7 +262,7 @@ buildCSVString t = T.singleton '\"' <> T.concatMap escape t <> T.singleton '\"'
 
 openFileRetryTimeout :: Int -> Int -> FilePath -> IOMode -> IO (Maybe Handle)
 openFileRetryTimeout toTime ri fp m =
-  timeout toTime (openFileRetry ri fp m) >>= pure . (fromMaybe Nothing)
+  timeout toTime (openFileRetry ri fp m) >>= pure . fromMaybe Nothing
 
 openFileRetry :: Int -> FilePath -> IOMode -> IO (Maybe Handle)
 openFileRetry ri fp m =

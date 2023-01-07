@@ -5,13 +5,12 @@ module Sebweb.ToggleQuery (
 , tglAny
 , tglSwap
 , tglExclM1
+, tglAddM1
 , toggleTqs'
 , tglLink
 , extractFirstTqi
 , extractAllTqis
-, ToggleQueryState(..)
-, loghDefaultTqs
-, logiDefaultTqs
+, ToggleQueryState
 ) where
 
 import Prelude hiding (div)
@@ -62,7 +61,7 @@ extractAllTqis :: Int -> ToggleQueryState -> [T.Text]
 extractAllTqis ind tqs = map fst $ filter snd (snd $ tqs !! ind)
 
 queryTqs :: Int -> Int -> ToggleQueryState -> Bool
-queryTqs it el tqs = snd ((snd (tqs !! it)) !! el)
+queryTqs it el tqs = snd (snd (tqs !! it) !! el)
 
 
 -- ------------------------------------------------------------------------
@@ -74,8 +73,8 @@ wrapTqi f tqi = (fst tqi, f $ snd tqi)
 toggleTqs :: Int -> (ToggleQueryItem -> ToggleQueryItem) -> ToggleQueryState ->
              ToggleQueryState
 toggleTqs _ _ [] = []
-toggleTqs 0 tog (x : xs) = (tog x) : xs
-toggleTqs ind tog (x : xs) = x : (toggleTqs (ind - 1) tog xs)
+toggleTqs 0 tog (x : xs) = tog x : xs
+toggleTqs ind tog (x : xs) = x : toggleTqs (ind - 1) tog xs
 
 toggleTqs' :: Int -> ToggleFunction -> ToggleQueryState -> ToggleQueryState
 toggleTqs' it fun tqs = toggleTqs it (wrapTqi fun) tqs
@@ -88,7 +87,7 @@ tglAny :: Int -> ToggleFunction
 tglAny ind xs = modifyList ind (\(t, bo) -> (t, not bo)) xs
 
 tglSwap :: ToggleFunction
-tglSwap = (tglAny 1) . (tglAny 0)
+tglSwap = tglAny 1 . tglAny 0
 
 
 tglAddM1 :: Int -> ToggleFunction
@@ -97,29 +96,8 @@ tglAddM1 ind xs = let xs' = tglAny ind xs
 
 tglExclM1 :: Int -> ToggleFunction
 tglExclM1 _ [] = []
-tglExclM1 0 (x : xs) = (fst x, True) : (tglExclM1 (-1) xs)
-tglExclM1 ind (x : xs) = (fst x, False) : (tglExclM1 (ind - 1) xs)
-
-
--- ------------------------------------------------------------------------
--- Default TQS for various pages to break dependencies problems with View
-
-loghDefaultTqs :: ToggleQueryState
-loghDefaultTqs = [
-  ("day", [("1", True), ("2", False), ("3", False)])
-  , ("status", [("2xx", True), ("3xx", False), ("4xx", False), ("5xx", False)])
-  , ("method", [("GET", True), ("POST", False), ("all", False)])
-  , ("static", [("0", True), ("1", False), ("all", False)])
-  , ("details", [("0", True), ("1", False)])
-  ]
-
-logiDefaultTqs :: ToggleQueryState
-logiDefaultTqs = [
-  ("day", [("1", True), ("2", False), ("3", False)])
-  , ("level", [("Crt", True), ("Err", True), ("Inf", False)])
-  , ("type", [("Ath", True), ("Wrk", True), ("Oth", True), ("Wrp", False)])
-  , ("details", [("0", True), ("1", False)])
-  ]
+tglExclM1 0 (x : xs) = (fst x, True) : tglExclM1 (-1) xs
+tglExclM1 ind (x : xs) = (fst x, False) : tglExclM1 (ind - 1) xs
 
 
 -- ------------------------------------------------------------------------
