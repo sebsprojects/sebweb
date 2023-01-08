@@ -1,3 +1,6 @@
+- optional config params, like sslSniPath
+- improve logging on startup: config parsing and tls / settings
+
 - static file serving
 - integrate toggle query
 - use hashing for static file tags

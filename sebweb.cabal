@@ -52,6 +52,8 @@ library
                       , wai
                       , warp
                       , warp-tls
+                      , tls
+                      , data-default-class
                       , http-types
                       , network
                       , blaze-html

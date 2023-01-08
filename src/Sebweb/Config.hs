@@ -19,6 +19,7 @@ import System.Directory
 import System.IO
 import Control.Exception
 import Text.Read
+import Data.Default.Class (def)
 import Data.Maybe
 import Data.Time
 import Data.List (dropWhileEnd)
@@ -37,6 +38,7 @@ import Sebweb.LogH
 import Sebweb.ResponseCommon
 import Sebweb.Middleware
 import Sebweb.Session
+import Network.TLS
 
 
 data ServerConfig = ServerConfig {
@@ -47,8 +49,12 @@ data ServerConfig = ServerConfig {
 , cHttpPort :: Int
 , cHttpsPort :: Int
 
-, cSslCertPath :: T.Text
-, cSslKeyPath :: T.Text
+, cSslCertFile :: T.Text
+, cSslKeyFile :: T.Text
+
+, cSslSniPath :: T.Text
+, cSslSniHosts :: [T.Text]
+
 , cUsersDirPath :: T.Text
 , cLogDirPath :: T.Text
 , cStaticDirPaths :: [T.Text]
@@ -83,7 +89,8 @@ parseList :: T.Text -> Maybe [T.Text]
 parseList t = case T.uncons (T.strip t) of
   Just ('[', t1) -> case T.unsnoc t1 of
     Just (t2, ']') ->
-      Just $ map (T.strip . T.filter (/= '\"')) (T.split (== ',') t2)
+      let toks = map (T.strip . T.filter (/= '\"')) (T.split (== ',') t2)
+      in Just $ filter (not . T.null) toks
     _ -> Nothing
   _ -> Nothing
 
@@ -110,8 +117,10 @@ configFromText t =
      updM valT "serverName"         (\c v -> c { cServerName = v }) $
      updM valI "httpPort"           (\c v -> c { cHttpPort = v }) $
      updM valI "httpsPort"          (\c v -> c { cHttpsPort = v }) $
-     updM valT "sslCertPath"        (\c v -> c { cSslCertPath = v }) $
-     updM valT "sslKeyPath"         (\c v -> c { cSslKeyPath = v }) $
+     updM valT "sslCertFile"        (\c v -> c { cSslCertFile = v }) $
+     updM valT "sslKeyFile"         (\c v -> c { cSslKeyFile = v }) $
+     updM valT "sslSniPath"         (\c v -> c { cSslSniPath = v }) $
+     updM valL "sslSniHosts"        (\c v -> c { cSslSniHosts = v }) $
      updM valT "usersDirPath"       (\c v -> c { cUsersDirPath = v }) $
      updM valT "logDirPath"         (\c v -> c { cLogDirPath = v }) $
      updM valL "staticDirPaths"     (\c v -> c { cStaticDirPaths = v }) $
@@ -150,17 +159,18 @@ runStandardRedirecter cfg ilq =
     withCertbotACMEHandler ilq (cStaticDirPaths cfg) $
       -- Removed all middleware checks, this should be handled by
       -- the main app once redirected
---    withResponseTimeoutCheck (cfgI "responseTimeout" cfg) errorPage $
---    withHeaderHostCheck (cfgT "hostName" cfg) errorPage $
---    withMethodCheck errorPage $
---    withContentLengthCheck (cfgI "maxContentLength" cfg) errorPage $
+      -- withResponseTimeoutCheck (cfgI "responseTimeout" cfg) errorPage $
+      -- withHeaderHostCheck (cfgT "hostName" cfg) errorPage $
+      -- withMethodCheck errorPage $
+      -- withContentLengthCheck (cfgI "maxContentLength" cfg) errorPage $
     \req resp -> resp $ buildFullRedirectResp (cHostName cfg) req
 
 runStandardApp :: ServerConfig -> ILogQueue -> HLogQueue ->
                   SessionStore -> ErrorPage -> Application -> IO ()
 runStandardApp cfg ilq hlq sessionStore errorPage app = do
   let hostName = cHostName cfg
-  runTLS (warpTLSSettings cfg) (warpMainSettings cfg ilq) $
+  sniLookup <- readSniFiles cfg
+  runTLS (warpTLSSettings cfg sniLookup) (warpMainSettings cfg ilq) $
     withRevision (cRevision cfg) $
     withRequestLogging hlq $
     withCommonHeaders $
@@ -182,6 +192,16 @@ logStartup success = do
   logDirect stdout (ld { ildMessage = msg <> " out=stdout"})
   logDirect stderr (ld { ildMessage = msg <> " out=stderr"})
 
+readSniFiles :: ServerConfig -> IO [(Maybe HostName, Credentials)]
+readSniFiles cfg = do
+  -- TODO: Should come from config
+  let sniHosts = cSslSniHosts cfg
+  let p = cSslSniPath cfg
+  eCreds <- mapM (\h -> credentialLoadX509 (T.unpack $ p <> "/" <> h <> ".pem") (T.unpack $ p <> "/" <> h <> ".key")) sniHosts
+  let mCreds = map (either (const Nothing) (\c -> Just $ Credentials [c])) eCreds
+  let sniMap = zip [Just $ T.unpack h | h <- sniHosts] mCreds
+  return $ map (\(a, b) -> (a, fromJust b)) $ filter (\(_, b) -> isJust b) sniMap
+  
 
 -- --------------------------------------------------------------------------
 -- Warp Settings
@@ -200,10 +220,13 @@ warpMainSettings c ilq =
   setOnException (handleWarpException ilq) $
   setOnExceptionResponse serveExceptionResponse defaultSettings
 
-warpTLSSettings :: ServerConfig -> TLSSettings
-warpTLSSettings c = s { onInsecure = DenyInsecure m }
-  where s = tlsSettings (T.unpack $ cSslCertPath c) (T.unpack $ cSslKeyPath c)
-        m = "sebsmpu accepts only secure connections via HTTPS at this " <>
+warpTLSSettings :: ServerConfig -> [(Maybe HostName, Credentials)] -> TLSSettings
+warpTLSSettings cfg sniLookup = 
+  (tlsSettings (T.unpack $ cSslCertFile cfg) (T.unpack $ cSslKeyFile cfg)) {
+      onInsecure = DenyInsecure m
+    , tlsServerHooks = def { onServerNameIndication = \h -> return $ fromMaybe mempty $ lookup h sniLookup }
+  }
+  where m = "sebsmpu accepts only secure connections via HTTPS at this " <>
             "port. Please upgrade!"
 
 
@@ -227,5 +250,3 @@ serveExceptionResponse e = case fromException e of
   _ ->
     buildPlainResp status500 $ es <> "Internal Server Error."
   where es = "sebsmpu encountered an exception: "
-
-
