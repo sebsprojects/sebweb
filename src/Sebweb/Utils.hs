@@ -81,7 +81,7 @@ extractPathSuffix' [] = Nothing
 extractPathSuffix' xs = extractPathSuffix $ last xs
 
 isWebSuffix :: T.Text -> Bool
-isWebSuffix suff = suff `elem` ["css", "js"]
+isWebSuffix suff = suff `elem` ["css", "js", "woff2"]
 
 isResourceSuffix :: T.Text -> Bool
 isResourceSuffix suff = suff `elem` ["txt", "png", "jpg", "svg", "pdf", "ico"]

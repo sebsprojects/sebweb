@@ -32,16 +32,15 @@ import Sebweb.ViewLogi
 -- ------------------------------------------------------------------------
 -- GET Handler
 
-serveStaticContent :: T.Text -> T.Text -> RequestData -> ErrorPage ->
+serveStaticContent :: T.Text -> RequestData -> ErrorPage ->
                       (RequestData -> T.Text -> Html) -> IO Response
-serveStaticContent contDir ext rd errorPage htmlBuilder = do
-  let fp = T.unpack $ contDir <> "/" <> rdPath rd <> "." <> ext
+serveStaticContent filePath rd errorPage htmlBuilder = do
   -- TODO: FILE IO
-  fe <- doesFileExist fp
+  fe <- doesFileExist $ T.unpack filePath
   case fe of
     True -> do
       -- TODO: FILE IO
-      content <- TI.readFile fp
+      content <- TI.readFile $ T.unpack filePath
       return $ buildHtmlResp' (htmlBuilder rd content)
     False -> do
       putStrLn "File does not exist"

@@ -314,5 +314,6 @@ ctHeader "svg" = [(hContentType, "image/svg+xml")]
 ctHeader "png" = [(hContentType, "image/png")]
 ctHeader "jpg" = [(hContentType, "image/jpeg")]
 ctHeader "pdf" = [(hContentType, "application/pdf")]
+ctHeader "woff2" = [(hContentType, "font/woff2")]
 ctHeader _ = []
 
